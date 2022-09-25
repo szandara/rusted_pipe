@@ -1,0 +1,30 @@
+[package]
+name = "rusted_pipe"
+version = "0.1.0"
+authors = ["Simone Zandara <simone.zandara@gmail.com>"]
+edition = "2021"
+
+[lib]
+name = "rusted_pipe"
+path = "src/mod.rs"
+
+[dependencies]
+futures = { version = "0.3.17", features = ["thread-pool"] }
+tokio = { version = "1", features = ["full"] }
+approx = "0.4"
+lazy_static = "1.4.0"
+byteorder = "1.4.3"
+nalgebra = {version = "0.29.0"}
+crossbeam = {version = "0.8.1"}
+partial-min-max = {version = "0.4.0"}
+rand = {version = "0.8.4"}
+itertools = {version = "0.10.3"}
+k = {version = "0.26.0"}
+anyhow = {version = "1.0.43"}
+thiserror = {version = "1.0"}
+smallvec = {version = "1.6.1"}
+mockall = {version = "0.11.0"}
+mockall_double = {version = "0.2.1"}
+indexmap = {version = "1.7.0"}
+rayon = {version = "1.5.1"}
+
