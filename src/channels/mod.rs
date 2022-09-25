@@ -56,7 +56,38 @@ impl PartialEq for ChannelID {
 
 type PacketBufferAddress = (ChannelID, DataVersion);
 struct PacketWithAddress(PacketBufferAddress, UntypedPacket);
-type BufferedReadData = HashMap<PacketBufferAddress, UntypedPacket>;
+
+#[derive(Default)]
+pub struct BufferedReadData {
+    data: HashMap<PacketBufferAddress, UntypedPacket>,
+}
+
+impl BufferedReadData {
+    pub fn new() -> BufferedReadData {
+        BufferedReadData {
+            data: HashMap::<PacketBufferAddress, UntypedPacket>::default(),
+        }
+    }
+
+    pub fn insert(&mut self, channel: &ChannelID, packet: UntypedPacket) {
+        let data_version = (channel.clone(), packet.version.clone());
+        self.data.insert(data_version, packet);
+    }
+
+    pub fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool {
+        let data_version = (channel.clone(), version.clone());
+        self.data.contains_key(&data_version)
+    }
+
+    pub fn remove_version(
+        &mut self,
+        channel: &ChannelID,
+        version: &DataVersion,
+    ) -> Option<UntypedPacket> {
+        let data_version = (channel.clone(), version.clone());
+        self.data.remove(&data_version)
+    }
+}
 
 pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     let (channel_sender, channel_receiver) = unbounded::<UntypedPacket>();

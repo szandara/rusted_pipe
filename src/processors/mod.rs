@@ -127,7 +127,7 @@ impl Graph {
     fn stop(&mut self) {
         self.running.swap(false, Ordering::Relaxed);
         for n in 0..self.node_threads.len() {
-            self.node_threads.remove(n).join();
+            self.node_threads.remove(n).join().unwrap();
         }
     }
 }

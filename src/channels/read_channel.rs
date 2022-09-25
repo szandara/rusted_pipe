@@ -124,13 +124,16 @@ impl ReadChannel {
         packet: UntypedPacket,
         channel: ChannelID,
     ) -> Result<PacketBufferAddress, ChannelError> {
-        let data_version = (channel.clone(), packet.version.clone());
-        if self.buffered_data.contains_key(&data_version) {
-            return Err(ChannelError::DuplicateDataVersionError(data_version));
+        if self.buffered_data.has_version(&channel, &packet.version) {
+            return Err(ChannelError::DuplicateDataVersionError((
+                channel.clone(),
+                packet.version.clone(),
+            )));
         }
 
-        self.buffered_data.insert(data_version.clone(), packet);
-        Ok(data_version)
+        let packet_address = (channel.clone(), packet.version.clone());
+        self.buffered_data.insert(&channel, packet);
+        Ok(packet_address)
     }
 
     pub fn try_read_index(
@@ -161,12 +164,7 @@ impl ReadChannel {
     }
 
     pub fn has_version(&self, channel_id: &ChannelID, data_version: &DataVersion) -> bool {
-        self.buffered_data
-            .contains_key(&(channel_id.clone(), *data_version))
-    }
-
-    fn buffered_data_mut(&mut self) -> &mut BufferedReadData {
-        &mut self.buffered_data
+        self.buffered_data.has_version(channel_id, data_version)
     }
 
     pub fn available_channels(&self) -> Keys<ChannelID, UntypedReceiverChannel> {
@@ -179,12 +177,14 @@ impl ReadChannel {
         let packet_set = channels
             .iter()
             .map(|channel_id| {
-                self.buffered_data_mut()
-                    .remove_entry(&(channel_id.clone(), *data_version))
-            })
-            .map(|entry| match entry {
-                Some(entry) => Some(PacketWithAddress(entry.0, entry.1)),
-                None => None,
+                let removed_packet = self.buffered_data.remove_version(channel_id, data_version);
+                match removed_packet {
+                    Some(entry) => Some(PacketWithAddress(
+                        (channel_id.clone(), data_version.clone()),
+                        entry,
+                    )),
+                    None => None,
+                }
             })
             .collect();
 
