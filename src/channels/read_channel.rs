@@ -1,11 +1,11 @@
+use super::data_buffers::{DataBuffer, HashmapBufferedData};
 use super::ChannelError;
-use super::{BufferedReadData, PacketBufferAddress, PacketWithAddress, UntypedReceiverChannel};
 use super::{ChannelID, DataVersion};
 use super::{Packet, PacketView, UntypedPacket};
+use super::{PacketBufferAddress, PacketWithAddress, UntypedReceiverChannel};
 use crossbeam::channel::Receiver;
 
 use crate::packet::UntypedPacketCast;
-
 use indexmap::{map::Keys, IndexMap};
 use std::collections::HashMap;
 
@@ -84,9 +84,8 @@ unsafe impl Send for PacketSet {}
 
 pub struct ReadChannel {
     channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
-    buffered_data: BufferedReadData,
+    buffered_data: Box<dyn DataBuffer>,
     channel_index: HashMap<ChannelID, usize>,
-    synchronizer: Box<dyn PacketSynchronizer>,
 }
 
 unsafe impl Send for ReadChannel {}
@@ -94,16 +93,15 @@ unsafe impl Send for ReadChannel {}
 impl ReadChannel {
     pub fn default() -> Self {
         Self {
-            synchronizer: Box::new(TimestampPacketSynchronizer {}),
             channels: Default::default(),
-            buffered_data: Default::default(),
+            buffered_data: Box::new(HashmapBufferedData::default()),
             channel_index: Default::default(),
         }
     }
 
-    pub fn synchronize(&self, data_version: &DataVersion) -> bool {
-        self.synchronizer.synchronize(&self, data_version)
-    }
+    // pub fn synchronize(&self, data_version: &DataVersion) -> bool {
+    //     self.buffered_data.synchronize(data_version)
+    // }
 
     pub fn add_channel(&mut self, channel_id: &ChannelID, receiver: UntypedReceiverChannel) {
         self.channels.insert(channel_id.clone(), receiver);
@@ -124,15 +122,7 @@ impl ReadChannel {
         packet: UntypedPacket,
         channel: ChannelID,
     ) -> Result<PacketBufferAddress, ChannelError> {
-        if self.buffered_data.has_version(&channel, &packet.version) {
-            return Err(ChannelError::DuplicateDataVersionError((
-                channel.clone(),
-                packet.version.clone(),
-            )));
-        }
-
-        let packet_address = (channel.clone(), packet.version.clone());
-        self.buffered_data.insert(&channel, packet);
+        let packet_address = self.buffered_data.insert(&channel, packet)?;
         Ok(packet_address)
     }
 
@@ -163,48 +153,31 @@ impl ReadChannel {
         self.try_read_result(packet, channel)
     }
 
-    pub fn has_version(&self, channel_id: &ChannelID, data_version: &DataVersion) -> bool {
-        self.buffered_data.has_version(channel_id, data_version)
-    }
-
     pub fn available_channels(&self) -> Keys<ChannelID, UntypedReceiverChannel> {
         self.channels.keys()
     }
 
-    pub fn get_packets_for_version(&mut self, data_version: &DataVersion) -> PacketSet {
-        let channels: Vec<ChannelID> = self.available_channels().cloned().collect();
+    // pub fn get_packets_for_version(&mut self, data_version: &DataVersion) -> PacketSet {
+    //     let channels: Vec<ChannelID> = self.available_channels().cloned().collect();
 
-        let packet_set = channels
-            .iter()
-            .map(|channel_id| {
-                let removed_packet = self.buffered_data.remove_version(channel_id, data_version);
-                match removed_packet {
-                    Some(entry) => Some(PacketWithAddress(
-                        (channel_id.clone(), data_version.clone()),
-                        entry,
-                    )),
-                    None => None,
-                }
-            })
-            .collect();
+    //     let packet_set = channels
+    //         .iter()
+    //         .map(|channel_id| {
+    //             let removed_packet = self
+    //                 .buffered_data
+    //                 .consume(&(channel_id.clone(), data_version.clone()));
+    //             match removed_packet {
+    //                 Some(entry) => Some(PacketWithAddress(
+    //                     (channel_id.clone(), data_version.clone()),
+    //                     entry,
+    //                 )),
+    //                 None => None,
+    //             }
+    //         })
+    //         .collect();
 
-        PacketSet::new(packet_set, self.channel_index.clone())
-    }
-}
-
-trait PacketSynchronizer {
-    fn synchronize(&self, read_channel: &ReadChannel, data_version: &DataVersion) -> bool;
-}
-
-#[derive(Default, Debug)]
-struct TimestampPacketSynchronizer {}
-impl PacketSynchronizer for TimestampPacketSynchronizer {
-    fn synchronize(&self, read_channel: &ReadChannel, data_version: &DataVersion) -> bool {
-        read_channel
-            .available_channels()
-            .map(|channel_id| read_channel.has_version(&channel_id, data_version))
-            .all(|has_version| has_version)
-    }
+    //     PacketSet::new(packet_set, self.channel_index.clone())
+    // }
 }
 
 #[cfg(test)]
@@ -252,17 +225,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_read_channel_get_packets_packetset_has_all_channels_if_no_version() {
-        let mut read_channel = test_read_channel().0;
-        let packetset = read_channel.get_packets_for_version(&DataVersion { timestamp: 1 });
+    // #[test]
+    // fn test_read_channel_get_packets_packetset_has_all_channels_if_no_version() {
+    //     let mut read_channel = test_read_channel().0;
+    //     let packetset = read_channel.get_packets_for_version(&DataVersion { timestamp: 1 });
 
-        assert_eq!(packetset.channels(), 1);
-        assert!(packetset
-            .get_channel::<String>(&ChannelID::from("test_channel_1"))
-            .ok()
-            .is_none());
-    }
+    //     assert_eq!(packetset.channels(), 1);
+    //     assert!(packetset
+    //         .get_channel::<String>(&ChannelID::from("test_channel_1"))
+    //         .ok()
+    //         .is_none());
+    // }
 
     #[test]
     fn test_read_channel_try_read_returns_error_if_no_data() {
@@ -294,10 +267,6 @@ mod tests {
                 DataVersion { timestamp: 1 }
             )
         );
-        assert!(read_channel.has_version(
-            &ChannelID::from("test_channel_1"),
-            &DataVersion { timestamp: 1 }
-        ));
     }
     #[test]
     fn test_read_channel_try_read_returns_error_if_no_channel() {

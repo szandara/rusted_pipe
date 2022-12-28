@@ -42,9 +42,7 @@ impl Graph {
 
     pub fn add_node(&mut self, node: Node) -> Result<(), RustedPipeError> {
         let node_id = node.id.clone();
-        self.nodes
-            .entry(node_id)
-            .or_insert(node);
+        self.nodes.entry(node_id).or_insert(node);
         Ok(())
     }
 
@@ -184,9 +182,9 @@ fn consume(running: Arc<AtomicBool>, mut workers: Vec<ProcessorWorker>) {
 
 fn read_channel_data(
     running: Arc<AtomicBool>,
-    assigned_id: usize,
+    _assigned_id: usize,
     mut read_channel: ReadChannel,
-    work_queue: Arc<Injector<ReadEvent>>,
+    _work_queue: Arc<Injector<ReadEvent>>,
 ) {
     let max_range = read_channel.available_channels().len();
 
@@ -202,16 +200,16 @@ fn read_channel_data(
 
     while running.load(Ordering::Relaxed) == true {
         let channel_index = selector.ready();
-        let read_version = read_channel.try_read_index(channel_index);
-        if let Ok(version) = read_version {
-            if read_channel.synchronize(&version.1) {
-                let packet_set = read_channel.get_packets_for_version(&version.1);
-                work_queue.push(ReadEvent {
-                    processor_index: assigned_id,
-                    packet_data: packet_set,
-                })
-            }
-        }
+        let _read_version = read_channel.try_read_index(channel_index);
+        // if let Ok(version) = read_version {
+        //     if read_channel.synchronize(&version.1) {
+        //         let packet_set = read_channel.get_packets_for_version(&version.1);
+        //         work_queue.push(ReadEvent {
+        //             processor_index: assigned_id,
+        //             packet_data: packet_set,
+        //         })
+        //     }
+        // }
     }
 }
 
@@ -232,12 +230,22 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    fn new(handler: ProcessorSafe) -> Self {
+    fn default_channels(handler: ProcessorSafe) -> Self {
         Node {
             id: handler.id().clone(),
             is_source: true,
             write_channel: WriteChannel::default(),
             read_channel: ReadChannel::default(),
+            handler,
+        }
+    }
+
+    fn new(handler: ProcessorSafe, write_channel: WriteChannel, read_channel: ReadChannel) -> Self {
+        Node {
+            id: handler.id().clone(),
+            is_source: true,
+            write_channel: write_channel,
+            read_channel: read_channel,
             handler,
         }
     }
@@ -362,22 +370,21 @@ mod tests {
 
     #[test]
     fn test_linked_nodes_can_send_and_receive_data() {
-        
         let node0 = TestNodeProducer {
             id: "producer1".to_string(),
         };
         let node0 = Arc::new(node0);
-        let node0 = Node::new(node0);
+        let node0 = Node::default_channels(node0);
 
         let node1 = TestNodeProducer {
             id: "producer2".to_string(),
         };
         let node1 = Arc::new(node1);
-        let node1 = Node::new(node1);
+        let node1 = Node::default_channels(node1);
 
         let process_terminal = TestNodeConsumer::new();
         let mut process_terminal_handler = Arc::new(process_terminal);
-        let process_terminal = Node::new(process_terminal_handler.clone());
+        let process_terminal = Node::default_channels(process_terminal_handler.clone());
 
         let mut graph = Graph::new();
 

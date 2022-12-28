@@ -31,6 +31,9 @@ pub type Packet<T> = PacketBase<Box<T>>;
 pub type PacketView<'a, T> = PacketBase<&'a T>;
 pub type UntypedPacket = Packet<dyn Any>;
 
+unsafe impl Sync for Packet<dyn Any + 'static> {}
+unsafe impl Send for Packet<dyn Any + 'static> {}
+
 pub trait UntypedPacketCast: 'static {
     fn deref_owned<T: 'static>(self) -> Result<Packet<T>, PacketError>;
     fn deref<T: 'static>(&self) -> Result<PacketView<T>, PacketError>;
