@@ -26,7 +26,7 @@ struct ReadEvent {
 unsafe impl Send for ReadEvent {}
 
 pub struct Graph {
-    nodes: IndexMap<String, ProcessorBase>,
+    nodes: IndexMap<String, Node>,
     running: Arc<AtomicBool>,
     node_threads: Vec<JoinHandle<()>>,
 }
@@ -34,17 +34,17 @@ pub struct Graph {
 impl Graph {
     pub fn new() -> Self {
         Graph {
-            nodes: IndexMap::<String, ProcessorBase>::default(),
+            nodes: IndexMap::<String, Node>::default(),
             running: Arc::new(AtomicBool::new(false)),
             node_threads: Vec::<JoinHandle<()>>::default(),
         }
     }
 
-    pub fn add_node(&mut self, node: ProcessorSafe) -> Result<(), RustedPipeError> {
-        let node_id = node.id().clone();
+    pub fn add_node(&mut self, node: Node) -> Result<(), RustedPipeError> {
+        let node_id = node.id.clone();
         self.nodes
             .entry(node_id)
-            .or_insert(ProcessorBase::new(node));
+            .or_insert(node);
         Ok(())
     }
 
@@ -217,7 +217,7 @@ fn read_channel_data(
 
 /// PROCESSORS
 
-struct ProcessorBase {
+pub struct Node {
     id: String,
     is_source: bool,
     write_channel: WriteChannel,
@@ -225,15 +225,15 @@ struct ProcessorBase {
     handler: ProcessorSafe,
 }
 
-impl fmt::Debug for ProcessorBase {
+impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.id)
     }
 }
 
-impl ProcessorBase {
+impl Node {
     fn new(handler: ProcessorSafe) -> Self {
-        ProcessorBase {
+        Node {
             id: handler.id().clone(),
             is_source: true,
             write_channel: WriteChannel::default(),
@@ -362,23 +362,28 @@ mod tests {
 
     #[test]
     fn test_linked_nodes_can_send_and_receive_data() {
-        let process_terminal = TestNodeConsumer::new();
+        
         let node0 = TestNodeProducer {
             id: "producer1".to_string(),
         };
+        let node0 = Arc::new(node0);
+        let node0 = Node::new(node0);
+
         let node1 = TestNodeProducer {
             id: "producer2".to_string(),
         };
+        let node1 = Arc::new(node1);
+        let node1 = Node::new(node1);
+
+        let process_terminal = TestNodeConsumer::new();
+        let mut process_terminal_handler = Arc::new(process_terminal);
+        let process_terminal = Node::new(process_terminal_handler.clone());
 
         let mut graph = Graph::new();
 
-        let node0 = Arc::new(node0);
-        let node1 = Arc::new(node1);
-        let mut process_terminal = Arc::new(process_terminal);
-
         graph.add_node(node0).unwrap();
         graph.add_node(node1).unwrap();
-        graph.add_node(process_terminal.clone()).unwrap();
+        graph.add_node(process_terminal).unwrap();
 
         graph
             .link(
@@ -405,7 +410,7 @@ mod tests {
             assert!(join_result.is_ok(), "{:?}", join_result.err().unwrap());
         }
         unsafe {
-            Arc::get_mut_unchecked(&mut process_terminal)
+            Arc::get_mut_unchecked(&mut process_terminal_handler)
                 .mock_object
                 .checkpoint();
         }
