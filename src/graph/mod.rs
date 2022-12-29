@@ -92,12 +92,7 @@ impl Graph {
 
             if !is_source {
                 handles.push(thread::spawn(move || {
-                    read_channel_data(
-                        reading_running_thread,
-                        assigned_node_id,
-                        read_channel,
-                        work_queue_reader,
-                    )
+                    read_channel_data(reading_running_thread, read_channel)
                 }));
             }
 
@@ -178,12 +173,7 @@ fn consume(running: Arc<AtomicBool>, mut workers: Vec<ProcessorWorker>) {
     }
 }
 
-fn read_channel_data(
-    running: Arc<AtomicBool>,
-    _assigned_id: usize,
-    mut read_channel: ReadChannel,
-    _work_queue: Arc<Injector<ReadEvent>>,
-) {
+fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
     let max_range = read_channel.available_channels().len();
 
     if max_range == 0 {
@@ -200,7 +190,7 @@ fn read_channel_data(
         let channel_index = selector.ready();
         let _read_version = read_channel.try_read_index(channel_index);
     }
-    println!("ASDASD");
+    read_channel.stop();
 }
 
 /// PROCESSORS

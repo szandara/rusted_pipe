@@ -1,8 +1,8 @@
 #![feature(get_mut_unchecked)]
 
 pub mod channels;
+pub mod graph;
 pub mod packet;
-pub mod processors;
 
 pub use packet::DataVersion;
 pub use packet::PacketError;
