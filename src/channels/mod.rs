@@ -5,7 +5,6 @@ mod write_channel;
 
 use crossbeam::channel::{unbounded, Receiver, Sender, TryRecvError};
 
-
 pub use crate::packet::{
     DataVersion, Packet, PacketError, PacketView, UntypedPacket, UntypedPacketCast,
 };
@@ -14,6 +13,7 @@ pub use read_channel::PacketSet;
 use thiserror::Error;
 
 pub use read_channel::ReadChannel;
+pub use read_channel::ReadEvent;
 pub use write_channel::WriteChannel;
 
 #[derive(Debug, Error, PartialEq, Clone)]
@@ -57,7 +57,7 @@ impl PartialEq for ChannelID {
 }
 
 type PacketBufferAddress = (ChannelID, DataVersion);
-struct PacketWithAddress(PacketBufferAddress, UntypedPacket);
+pub struct PacketWithAddress(PacketBufferAddress, UntypedPacket);
 
 pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     let (channel_sender, channel_receiver) = unbounded::<UntypedPacket>();

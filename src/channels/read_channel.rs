@@ -1,107 +1,98 @@
-use super::data_buffers::{DataBuffer, HashmapBufferedData};
+use super::data_buffers::{DataBuffer, HashmapBufferedData, OrderedBuffer, TimestampSynchronizer};
+use super::synchronizers::PacketSynchronizer;
 use super::ChannelError;
 use super::{ChannelID, DataVersion};
 use super::{Packet, PacketView, UntypedPacket};
 use super::{PacketBufferAddress, PacketWithAddress, UntypedReceiverChannel};
 use crossbeam::channel::Receiver;
+use crossbeam::deque::Injector;
+use itertools::Itertools;
 
 use crate::packet::UntypedPacketCast;
 use indexmap::{map::Keys, IndexMap};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub struct PacketSet {
-    ordered_channel_data: Vec<Option<PacketWithAddress>>,
-    channel_index_mapping: HashMap<ChannelID, usize>,
+    data: IndexMap<ChannelID, Option<PacketWithAddress>>,
 }
 
 impl PacketSet {
-    fn new(
-        ordered_channel_data: Vec<Option<PacketWithAddress>>,
-        channel_index_mapping: HashMap<ChannelID, usize>,
-    ) -> Self {
-        PacketSet {
-            ordered_channel_data,
-            channel_index_mapping,
-        }
+    pub fn new(data: IndexMap<ChannelID, Option<PacketWithAddress>>) -> Self {
+        PacketSet { data }
     }
 
     pub fn channels(&self) -> usize {
-        self.channel_index_mapping.len()
-    }
-
-    pub fn get_owned<T: 'static>(
-        &mut self,
-        channel_number: usize,
-    ) -> Result<Packet<T>, ChannelError> {
-        match self
-            .ordered_channel_data
-            .get_mut(channel_number)
-            .ok_or(ChannelError::MissingChannelIndex(channel_number))?
-            .take()
-        {
-            Some(maybe_packet_with_address) => {
-                Ok(maybe_packet_with_address.1.deref_owned::<T>()?)
-            }
-            None => Err(ChannelError::MissingChannelData(channel_number)),
-        }
+        self.data.len()
     }
 
     pub fn get<T: 'static>(&self, channel_number: usize) -> Result<PacketView<T>, ChannelError> {
         match self
-            .ordered_channel_data
-            .get(channel_number)
+            .data
+            .get_index(channel_number)
             .ok_or(ChannelError::MissingChannelIndex(channel_number))?
+            .1
         {
             Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
             None => Err(ChannelError::MissingChannelData(channel_number)),
         }
     }
 
-    pub fn get_channel_index(&self, channel_id: &ChannelID) -> Result<usize, ChannelError> {
-        Ok(*self
-            .channel_index_mapping
-            .get(&channel_id)
-            .ok_or(ChannelError::MissingChannel(channel_id.clone()))?)
-    }
-
     pub fn get_channel<T: 'static>(
         &self,
         channel_id: &ChannelID,
     ) -> Result<PacketView<T>, ChannelError> {
-        self.get(self.get_channel_index(channel_id)?)
-    }
-
-    pub fn get_channel_owned<T: 'static>(
-        &mut self,
-        channel_id: &ChannelID,
-    ) -> Result<Packet<T>, ChannelError> {
-        self.get_owned(self.get_channel_index(channel_id)?)
+        match self
+            .data
+            .get(channel_id)
+            .ok_or(ChannelError::MissingChannel(channel_id.clone()))?
+        {
+            Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
+            None => Err(ChannelError::MissingChannel(channel_id.clone())),
+        }
     }
 }
 
 unsafe impl Send for PacketSet {}
 
-pub struct ReadChannel {
-    channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
-    buffered_data: Box<dyn DataBuffer>,
-    channel_index: HashMap<ChannelID, usize>,
+pub struct ReadEvent {
+    pub processor_index: usize,
+    pub packet_data: PacketSet,
 }
 
 unsafe impl Send for ReadChannel {}
 
+pub struct ReadChannel {
+    buffered_data: Arc<Mutex<dyn OrderedBuffer>>,
+    synch_strategy: Box<dyn PacketSynchronizer>,
+    channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
+    channel_index: HashMap<ChannelID, usize>,
+}
+
+unsafe impl Send for ReadEvent {}
+
 impl ReadChannel {
     pub fn default() -> Self {
-        Self {
+        ReadChannel {
+            buffered_data: Arc::new(Mutex::new(HashmapBufferedData::default())),
+            synch_strategy: Box::new(TimestampSynchronizer::default()),
             channels: Default::default(),
-            buffered_data: Box::new(HashmapBufferedData::default()),
             channel_index: Default::default(),
         }
     }
 
-    // pub fn synchronize(&self, data_version: &DataVersion) -> bool {
-    //     self.buffered_data.synchronize(data_version)
-    // }
+    pub fn new(
+        buffered_data: Arc<Mutex<dyn OrderedBuffer>>,
+        synch_strategy: Box<dyn PacketSynchronizer>,
+    ) -> Self {
+        ReadChannel {
+            buffered_data,
+            synch_strategy,
+            channels: Default::default(),
+            channel_index: Default::default(),
+        }
+    }
 
     pub fn add_channel(&mut self, channel_id: &ChannelID, receiver: UntypedReceiverChannel) {
         self.channels.insert(channel_id.clone(), receiver);
@@ -116,13 +107,17 @@ impl ReadChannel {
             .map(|rec| rec.receiver.clone())
             .collect()
     }
-
-    fn try_read_result(
+    fn insert_packet(
         &mut self,
         packet: UntypedPacket,
         channel: ChannelID,
     ) -> Result<PacketBufferAddress, ChannelError> {
-        let packet_address = self.buffered_data.insert(&channel, packet)?;
+        let packet_address = self
+            .buffered_data
+            .lock()
+            .unwrap()
+            .insert(&channel, packet)?;
+        self.synch_strategy.packet_event(packet_address.clone());
         Ok(packet_address)
     }
 
@@ -138,7 +133,7 @@ impl ReadChannel {
         let packet = read_channel.try_receive()?;
         let channel_id = channel_id.clone();
 
-        self.try_read_result(packet, channel_id)
+        self.insert_packet(packet, channel_id)
     }
 
     pub fn try_read(&mut self, channel: &ChannelID) -> Result<PacketBufferAddress, ChannelError> {
@@ -150,34 +145,29 @@ impl ReadChannel {
             .ok_or(ChannelError::MissingChannel(channel.clone()))?
             .try_receive()?;
 
-        self.try_read_result(packet, channel)
+        self.insert_packet(packet, channel)
     }
 
-    pub fn available_channels(&self) -> Keys<ChannelID, UntypedReceiverChannel> {
-        self.channels.keys()
+    pub fn available_channels(&self) -> Vec<ChannelID> {
+        self.channels
+            .keys()
+            .into_iter()
+            .map(|key| key.clone())
+            .collect_vec()
     }
 
-    // pub fn get_packets_for_version(&mut self, data_version: &DataVersion) -> PacketSet {
-    //     let channels: Vec<ChannelID> = self.available_channels().cloned().collect();
+    pub fn start(&mut self, node_id: usize, work_queue: Arc<Injector<ReadEvent>>) -> () {
+        self.synch_strategy.start(
+            self.buffered_data.clone(),
+            work_queue,
+            node_id,
+            &self.available_channels(),
+        )
+    }
 
-    //     let packet_set = channels
-    //         .iter()
-    //         .map(|channel_id| {
-    //             let removed_packet = self
-    //                 .buffered_data
-    //                 .consume(&(channel_id.clone(), data_version.clone()));
-    //             match removed_packet {
-    //                 Some(entry) => Some(PacketWithAddress(
-    //                     (channel_id.clone(), data_version.clone()),
-    //                     entry,
-    //                 )),
-    //                 None => None,
-    //             }
-    //         })
-    //         .collect();
-
-    //     PacketSet::new(packet_set, self.channel_index.clone())
-    // }
+    pub fn stop(&mut self) -> () {
+        self.synch_strategy.stop()
+    }
 }
 
 #[cfg(test)]
@@ -205,23 +195,16 @@ mod tests {
         let mut read_channel = test_read_channel().0;
         assert_eq!(read_channel.available_channels().len(), 1);
         assert_eq!(
-            read_channel
-                .available_channels()
-                .collect::<Vec<&ChannelID>>(),
-            vec![&ChannelID::from("test_channel_1")]
+            read_channel.available_channels(),
+            vec![ChannelID::from("test_channel_1")]
         );
 
         let crossbeam_channels = untyped_channel();
         read_channel.add_channel(&ChannelID::from("test3"), crossbeam_channels.1);
         assert_eq!(read_channel.available_channels().len(), 2);
         assert_eq!(
-            read_channel
-                .available_channels()
-                .collect::<Vec<&ChannelID>>(),
-            vec![
-                &ChannelID::from("test_channel_1"),
-                &ChannelID::from("test3")
-            ]
+            read_channel.available_channels(),
+            vec![ChannelID::from("test_channel_1"), ChannelID::from("test3")]
         );
     }
 

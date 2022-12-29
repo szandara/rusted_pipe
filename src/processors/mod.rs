@@ -12,18 +12,14 @@ use crossbeam::deque::Injector;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::channels::{untyped_channel, ChannelID, PacketSet, ReadChannel, WriteChannel};
+use super::channels::{
+    untyped_channel, ChannelID, PacketSet, ReadChannel, ReadEvent, WriteChannel,
+};
+
 use super::RustedPipeError;
 use indexmap::IndexMap;
 
 type ProcessorSafe = Arc<dyn Processor>;
-
-struct ReadEvent {
-    processor_index: usize,
-    packet_data: PacketSet,
-}
-
-unsafe impl Send for ReadEvent {}
 
 pub struct Graph {
     nodes: IndexMap<String, Node>,
@@ -84,13 +80,15 @@ impl Graph {
         while !self.nodes.is_empty() {
             let processor = self.nodes.pop().unwrap();
 
-            let (_id, is_source, write_channel, read_channel, handler) = processor.1.start();
+            let (_id, is_source, write_channel, mut read_channel, handler) = processor.1.start();
 
             let assigned_node_id = node_id;
             let work_queue = Arc::new(Injector::<ReadEvent>::default());
             let work_queue_reader = work_queue.clone();
             let arc_write_channel = Arc::new(Mutex::new(write_channel));
             let reading_running_thread = self.running.clone();
+
+            read_channel.start(assigned_node_id, work_queue.clone());
 
             if !is_source {
                 handles.push(thread::spawn(move || {
@@ -201,16 +199,8 @@ fn read_channel_data(
     while running.load(Ordering::Relaxed) == true {
         let channel_index = selector.ready();
         let _read_version = read_channel.try_read_index(channel_index);
-        // if let Ok(version) = read_version {
-        //     if read_channel.synchronize(&version.1) {
-        //         let packet_set = read_channel.get_packets_for_version(&version.1);
-        //         work_queue.push(ReadEvent {
-        //             processor_index: assigned_id,
-        //             packet_data: packet_set,
-        //         })
-        //     }
-        // }
     }
+    println!("ASDASD");
 }
 
 /// PROCESSORS
@@ -230,22 +220,12 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    fn default_channels(handler: ProcessorSafe) -> Self {
+    fn new(handler: ProcessorSafe) -> Self {
         Node {
             id: handler.id().clone(),
             is_source: true,
             write_channel: WriteChannel::default(),
             read_channel: ReadChannel::default(),
-            handler,
-        }
-    }
-
-    fn new(handler: ProcessorSafe, write_channel: WriteChannel, read_channel: ReadChannel) -> Self {
-        Node {
-            id: handler.id().clone(),
-            is_source: true,
-            write_channel: write_channel,
-            read_channel: read_channel,
             handler,
         }
     }
@@ -374,17 +354,17 @@ mod tests {
             id: "producer1".to_string(),
         };
         let node0 = Arc::new(node0);
-        let node0 = Node::default_channels(node0);
+        let node0 = Node::new(node0);
 
         let node1 = TestNodeProducer {
             id: "producer2".to_string(),
         };
         let node1 = Arc::new(node1);
-        let node1 = Node::default_channels(node1);
+        let node1 = Node::new(node1);
 
         let process_terminal = TestNodeConsumer::new();
         let mut process_terminal_handler = Arc::new(process_terminal);
-        let process_terminal = Node::default_channels(process_terminal_handler.clone());
+        let process_terminal = Node::new(process_terminal_handler.clone());
 
         let mut graph = Graph::new();
 
