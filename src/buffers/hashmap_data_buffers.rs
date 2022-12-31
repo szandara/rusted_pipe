@@ -48,12 +48,18 @@ impl DataBuffer for HashmapBufferedData {
         Ok(data_version)
     }
 
-    fn consume(&mut self, version: &PacketBufferAddress) -> Option<UntypedPacket> {
-        self.data.remove(&version)
+    fn consume(
+        &mut self,
+        version: &PacketBufferAddress,
+    ) -> Result<Option<UntypedPacket>, BufferError> {
+        Ok(self.data.remove(&version))
     }
 
-    fn get(&mut self, version: &PacketBufferAddress) -> Option<&UntypedPacket> {
-        self.data.get(&version)
+    fn get(
+        &mut self,
+        version: &PacketBufferAddress,
+    ) -> Result<Option<&UntypedPacket>, BufferError> {
+        Ok(self.data.get(&version))
     }
 
     fn available_channels(&self) -> Vec<ChannelID> {
@@ -118,7 +124,13 @@ fn get_packets_for_version(
         .iter()
         .map(|channel_id| {
             let removed_packet = buffer_locked.consume(&(channel_id.clone(), data_version.clone()));
-            match removed_packet {
+            if removed_packet.is_err() {
+                eprintln!(
+                    "Error while reading data {}",
+                    removed_packet.as_ref().err().unwrap()
+                )
+            }
+            match removed_packet.unwrap() {
                 Some(entry) => (
                     channel_id.clone(),
                     Some(((channel_id.clone(), data_version.clone()), entry)),

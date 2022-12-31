@@ -20,7 +20,7 @@ pub enum PacketError {
     MissingChannelData(usize),
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, Ord, PartialOrd)]
 pub struct DataVersion {
     pub timestamp: u64,
 }
@@ -167,7 +167,7 @@ impl WorkQueue {
 
 #[derive(Eq, Hash, Debug, Clone)]
 pub struct ChannelID {
-    id: String,
+    pub id: String,
 }
 
 impl ChannelID {
