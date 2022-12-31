@@ -7,14 +7,15 @@ use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::thread::JoinHandle;
 
+use crate::packet::WorkQueue;
 use crossbeam::channel::Select;
-use crossbeam::deque::Injector;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::channels::{
-    untyped_channel, ChannelID, PacketSet, ReadChannel, ReadEvent, WriteChannel,
-};
+use crate::packet::{PacketSet, ReadEvent};
+
+use super::channels::{untyped_channel, ReadChannel, WriteChannel};
+use crate::packet::ChannelID;
 
 use super::RustedPipeError;
 use indexmap::IndexMap;
@@ -83,8 +84,7 @@ impl Graph {
             let (_id, is_source, write_channel, mut read_channel, handler) = processor.1.start();
 
             let assigned_node_id = node_id;
-            let work_queue = Arc::new(Injector::<ReadEvent>::default());
-            let work_queue_reader = work_queue.clone();
+            let work_queue = Arc::new(WorkQueue::default());
             let arc_write_channel = Arc::new(Mutex::new(write_channel));
             let reading_running_thread = self.running.clone();
 
@@ -124,7 +124,7 @@ impl Graph {
 }
 
 struct ProcessorWorker {
-    work_queue: Arc<Injector<ReadEvent>>,
+    work_queue: Arc<WorkQueue>,
     processor: Arc<dyn Processor>,
     write_channel: Arc<Mutex<WriteChannel>>,
     status: Arc<AtomicUsize>,

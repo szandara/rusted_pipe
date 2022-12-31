@@ -1,6 +1,8 @@
 use super::ChannelError;
 use super::UntypedSenderChannel;
-use super::{ChannelID, DataVersion, Packet};
+use crate::packet::ChannelID;
+use crate::packet::DataVersion;
+use crate::packet::Packet;
 
 use indexmap::{map::Keys, IndexMap};
 

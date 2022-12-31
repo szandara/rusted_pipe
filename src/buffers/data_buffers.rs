@@ -1,12 +1,9 @@
-use super::read_channel::ReadEvent;
 use super::synchronizers::PacketSynchronizer;
-use super::PacketBufferAddress;
-use super::PacketSet;
-use super::PacketWithAddress;
 
-use super::ChannelError;
-use super::{ChannelID, DataVersion};
-use crate::packet::UntypedPacket;
+use super::BufferError;
+use crate::packet::ChannelID;
+use crate::packet::DataVersion;
+use crate::packet::{PacketSet, UntypedPacket};
 use crossbeam::channel::Receiver;
 use crossbeam::channel::RecvTimeoutError;
 use crossbeam::channel::{unbounded, Sender};
@@ -22,6 +19,10 @@ use std::collections::HashMap;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use super::PacketBufferAddress;
+use super::PacketWithAddress;
+use crate::packet::WorkQueue;
+
 #[derive(Default)]
 pub struct HashmapBufferedData {
     data: HashMap<PacketBufferAddress, UntypedPacket>,
@@ -32,7 +33,7 @@ pub trait DataBuffer: Sync + Send {
         &mut self,
         channel: &ChannelID,
         packet: UntypedPacket,
-    ) -> Result<PacketBufferAddress, ChannelError>;
+    ) -> Result<PacketBufferAddress, BufferError>;
 
     fn consume(&mut self, version: &PacketBufferAddress) -> Option<UntypedPacket>;
 
@@ -50,9 +51,9 @@ impl DataBuffer for HashmapBufferedData {
         &mut self,
         channel: &ChannelID,
         packet: UntypedPacket,
-    ) -> Result<PacketBufferAddress, ChannelError> {
+    ) -> Result<PacketBufferAddress, BufferError> {
         if self.has_version(&channel, &packet.version) {
-            return Err(ChannelError::DuplicateDataVersionError((
+            return Err(BufferError::DuplicateDataVersionError((
                 channel.clone(),
                 packet.version.clone(),
             )));
@@ -136,10 +137,7 @@ fn get_packets_for_version(
             match removed_packet {
                 Some(entry) => (
                     channel_id.clone(),
-                    Some(PacketWithAddress(
-                        (channel_id.clone(), data_version.clone()),
-                        entry,
-                    )),
+                    Some(((channel_id.clone(), data_version.clone()), entry)),
                 ),
                 None => (channel_id.clone(), None),
             }
@@ -153,7 +151,7 @@ impl PacketSynchronizer for TimestampSynchronizer {
     fn start(
         &mut self,
         buffer: Arc<Mutex<dyn OrderedBuffer>>,
-        work_queue: Arc<Injector<ReadEvent>>,
+        work_queue: Arc<WorkQueue>,
         node_id: usize,
         available_channels: &Vec<ChannelID>,
     ) -> () {
@@ -179,10 +177,7 @@ impl PacketSynchronizer for TimestampSynchronizer {
                 synchronize(&mut buffer_thread, &available_channels, &data.1)
             {
                 let packet_set = get_packets_for_version(&data_version, &mut buffer_thread);
-                work_queue.push(ReadEvent {
-                    processor_index: node_id,
-                    packet_data: packet_set,
-                })
+                work_queue.push(node_id, packet_set)
             }
         });
         self.thread_handler = Some(handler);

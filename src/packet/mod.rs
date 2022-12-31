@@ -1,13 +1,23 @@
 use std::any::{Any, TypeId};
 use std::marker::Copy;
 
+use crossbeam::deque::{Injector, Steal};
+use indexmap::IndexMap;
 use thiserror::Error;
+
+use crate::buffers::PacketWithAddress;
 
 /// Possible inference error
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum PacketError {
     #[error("Received data of unexpected type, was expecting {0:?}")]
     UnexpectedDataType(TypeId),
+    #[error("Trying to use a channel which does not exist, channel id {0:?}")]
+    MissingChannel(ChannelID),
+    #[error("Trying to use a channel index which does not exist, channel index {0:?}")]
+    MissingChannelIndex(usize),
+    #[error("Channel has no data {0:?}")]
+    MissingChannelData(usize),
 }
 
 #[derive(Debug, Copy, Clone, Hash, Eq)]
@@ -86,5 +96,91 @@ impl UntypedPacketCast for UntypedPacket {
             data: data_ref,
             version: self.version,
         })
+    }
+}
+
+#[derive(Default)]
+pub struct PacketSet {
+    data: IndexMap<ChannelID, Option<PacketWithAddress>>,
+}
+
+impl PacketSet {
+    pub fn new(data: IndexMap<ChannelID, Option<PacketWithAddress>>) -> Self {
+        PacketSet { data }
+    }
+
+    pub fn channels(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn get<T: 'static>(&self, channel_number: usize) -> Result<PacketView<T>, PacketError> {
+        match self
+            .data
+            .get_index(channel_number)
+            .ok_or(PacketError::MissingChannelIndex(channel_number))?
+            .1
+        {
+            Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
+            None => Err(PacketError::MissingChannelData(channel_number)),
+        }
+    }
+
+    pub fn get_channel<T: 'static>(
+        &self,
+        channel_id: &ChannelID,
+    ) -> Result<PacketView<T>, PacketError> {
+        match self
+            .data
+            .get(channel_id)
+            .ok_or(PacketError::MissingChannel(channel_id.clone()))?
+        {
+            Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
+            None => Err(PacketError::MissingChannel(channel_id.clone())),
+        }
+    }
+}
+
+unsafe impl Send for PacketSet {}
+
+pub struct ReadEvent {
+    pub processor_index: usize,
+    pub packet_data: PacketSet,
+}
+
+#[derive(Default)]
+pub struct WorkQueue {
+    queue: Injector<ReadEvent>,
+}
+
+impl WorkQueue {
+    pub fn push(&self, node_id: usize, packet_set: PacketSet) {
+        self.queue.push(ReadEvent {
+            processor_index: node_id,
+            packet_data: packet_set,
+        })
+    }
+
+    pub fn steal(&self) -> Steal<ReadEvent> {
+        self.queue.steal()
+    }
+}
+
+#[derive(Eq, Hash, Debug, Clone)]
+pub struct ChannelID {
+    id: String,
+}
+
+impl ChannelID {
+    pub fn new(id: String) -> Self {
+        ChannelID { id }
+    }
+    pub fn from(id: &str) -> Self {
+        ChannelID { id: id.to_string() }
+    }
+}
+
+impl PartialEq for ChannelID {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
     }
 }

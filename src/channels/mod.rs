@@ -1,25 +1,20 @@
-mod data_buffers;
 mod read_channel;
-mod synchronizers;
 mod write_channel;
 
 use crossbeam::channel::{unbounded, Receiver, Sender, TryRecvError};
 
+use crate::buffers::BufferError;
 pub use crate::packet::{
-    DataVersion, Packet, PacketError, PacketView, UntypedPacket, UntypedPacketCast,
+    ChannelID, DataVersion, Packet, PacketError, PacketView, UntypedPacket, UntypedPacketCast,
 };
-pub use read_channel::PacketSet;
 
 use thiserror::Error;
 
 pub use read_channel::ReadChannel;
-pub use read_channel::ReadEvent;
 pub use write_channel::WriteChannel;
 
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum ChannelError {
-    #[error("Data was received in channel {0:?} with an already existing version.")]
-    DuplicateDataVersionError(PacketBufferAddress),
     #[error("Trying to use a channel which does not exist, channel id {0:?}")]
     MissingChannel(ChannelID),
     #[error("Trying to use a channel index which does not exist, channel index {0:?}")]
@@ -34,30 +29,9 @@ pub enum ChannelError {
     PacketError(#[from] PacketError),
     #[error("No more data to send. Closing channel.")]
     EndOfStreamError(ChannelID),
+    #[error("Error in the buffer operation.")]
+    ErrorInBuffer(#[from] BufferError),
 }
-
-#[derive(Eq, Hash, Debug, Clone)]
-pub struct ChannelID {
-    id: String,
-}
-
-impl ChannelID {
-    pub fn new(id: String) -> Self {
-        ChannelID { id }
-    }
-    pub fn from(id: &str) -> Self {
-        ChannelID { id: id.to_string() }
-    }
-}
-
-impl PartialEq for ChannelID {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-type PacketBufferAddress = (ChannelID, DataVersion);
-pub struct PacketWithAddress(PacketBufferAddress, UntypedPacket);
 
 pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     let (channel_sender, channel_receiver) = unbounded::<UntypedPacket>();

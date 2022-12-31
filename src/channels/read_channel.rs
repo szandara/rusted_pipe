@@ -1,65 +1,27 @@
-use super::data_buffers::{DataBuffer, HashmapBufferedData, OrderedBuffer, TimestampSynchronizer};
-use super::synchronizers::PacketSynchronizer;
 use super::ChannelError;
-use super::{ChannelID, DataVersion};
-use super::{Packet, PacketView, UntypedPacket};
-use super::{PacketBufferAddress, PacketWithAddress, UntypedReceiverChannel};
+use super::UntypedReceiverChannel;
+
+use crate::packet::ChannelID;
+use crate::packet::DataVersion;
+use crate::packet::UntypedPacket;
+
+use super::{Packet, PacketView};
+use crate::buffers::data_buffers::{
+    DataBuffer, HashmapBufferedData, OrderedBuffer, TimestampSynchronizer,
+};
+use crate::buffers::synchronizers::PacketSynchronizer;
+use crate::buffers::{PacketBufferAddress, PacketWithAddress};
 use crossbeam::channel::Receiver;
 use crossbeam::deque::Injector;
 use itertools::Itertools;
 
+use crate::packet::PacketSet;
+use crate::packet::ReadEvent;
 use crate::packet::UntypedPacketCast;
+use crate::packet::WorkQueue;
 use indexmap::{map::Keys, IndexMap};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-
-#[derive(Default)]
-pub struct PacketSet {
-    data: IndexMap<ChannelID, Option<PacketWithAddress>>,
-}
-
-impl PacketSet {
-    pub fn new(data: IndexMap<ChannelID, Option<PacketWithAddress>>) -> Self {
-        PacketSet { data }
-    }
-
-    pub fn channels(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn get<T: 'static>(&self, channel_number: usize) -> Result<PacketView<T>, ChannelError> {
-        match self
-            .data
-            .get_index(channel_number)
-            .ok_or(ChannelError::MissingChannelIndex(channel_number))?
-            .1
-        {
-            Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
-            None => Err(ChannelError::MissingChannelData(channel_number)),
-        }
-    }
-
-    pub fn get_channel<T: 'static>(
-        &self,
-        channel_id: &ChannelID,
-    ) -> Result<PacketView<T>, ChannelError> {
-        match self
-            .data
-            .get(channel_id)
-            .ok_or(ChannelError::MissingChannel(channel_id.clone()))?
-        {
-            Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
-            None => Err(ChannelError::MissingChannel(channel_id.clone())),
-        }
-    }
-}
-
-unsafe impl Send for PacketSet {}
-
-pub struct ReadEvent {
-    pub processor_index: usize,
-    pub packet_data: PacketSet,
-}
 
 unsafe impl Send for ReadChannel {}
 
@@ -156,7 +118,7 @@ impl ReadChannel {
             .collect_vec()
     }
 
-    pub fn start(&mut self, node_id: usize, work_queue: Arc<Injector<ReadEvent>>) -> () {
+    pub fn start(&mut self, node_id: usize, work_queue: Arc<WorkQueue>) -> () {
         self.synch_strategy.start(
             self.buffered_data.clone(),
             work_queue,
