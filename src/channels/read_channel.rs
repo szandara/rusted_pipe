@@ -5,19 +5,20 @@ use crate::packet::ChannelID;
 
 use crate::packet::UntypedPacket;
 
-
-use crate::buffers::hashmap_data_buffers::{HashmapBufferedData, TimestampSynchronizer};
+use crate::buffers::btree_data_buffers::BtreeBufferedData;
+use crate::buffers::hashmap_data_buffers::HashmapBufferedData;
 use crate::buffers::synchronizers::PacketSynchronizer;
+use crate::buffers::synchronizers::TimestampSynchronizer;
+
 use crate::buffers::{DataBuffer, OrderedBuffer, PacketBufferAddress};
 use crossbeam::channel::Receiver;
 
 use itertools::Itertools;
 
-
 use crate::packet::ReadEvent;
 
 use crate::packet::WorkQueue;
-use indexmap::{IndexMap};
+use indexmap::IndexMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -35,7 +36,7 @@ unsafe impl Send for ReadEvent {}
 impl ReadChannel {
     pub fn default() -> Self {
         ReadChannel {
-            buffered_data: Arc::new(Mutex::new(HashmapBufferedData::default())),
+            buffered_data: Arc::new(Mutex::new(BtreeBufferedData::default())),
             synch_strategy: Box::new(TimestampSynchronizer::default()),
             channels: Default::default(),
             channel_index: Default::default(),

@@ -10,8 +10,6 @@ use crossbeam::channel::Receiver;
 use crossbeam::channel::RecvTimeoutError;
 use crossbeam::channel::{unbounded, Sender};
 
-
-
 use itertools::Itertools;
 
 use std::sync::{Arc, Mutex};
@@ -27,15 +25,54 @@ use crate::packet::WorkQueue;
 
 use std::collections::BTreeMap;
 
-type Buffer = BTreeMap<DataVersion, UntypedPacket>;
+pub struct FixedSizeBTree {
+    data: BTreeMap<DataVersion, UntypedPacket>,
+    max_size: usize,
+}
+
+impl FixedSizeBTree {
+    fn default() -> Self {
+        FixedSizeBTree {
+            data: Default::default(),
+            max_size: 1000,
+        }
+    }
+
+    fn new(max_size: usize) -> Self {
+        FixedSizeBTree {
+            data: Default::default(),
+            max_size: max_size,
+        }
+    }
+
+    fn contains_key(&self, version: &DataVersion) -> bool {
+        self.data.contains_key(version)
+    }
+
+    fn get(&self, version: &DataVersion) -> Option<&UntypedPacket> {
+        self.data.get(version)
+    }
+
+    fn remove(&mut self, version: &DataVersion) -> Option<UntypedPacket> {
+        self.data.remove(version)
+    }
+
+    fn insert(&mut self, version: DataVersion, packet: UntypedPacket) {
+        self.data.insert(version, packet);
+        while self.data.len() > self.max_size {
+            let last_entry = self.data.last_entry().unwrap().key().clone();
+            self.data.remove(&last_entry);
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct BtreeBufferedData {
-    data: HashMap<ChannelID, Buffer>,
+    data: HashMap<ChannelID, FixedSizeBTree>,
 }
 
 impl BtreeBufferedData {
-    fn get_channel(&mut self, channel: &ChannelID) -> Result<&mut Buffer, BufferError> {
+    fn get_channel(&mut self, channel: &ChannelID) -> Result<&mut FixedSizeBTree, BufferError> {
         Ok(self
             .data
             .get_mut(channel)
@@ -45,11 +82,15 @@ impl BtreeBufferedData {
             )))?)
     }
 
-    fn get_or_create_channel(&mut self, channel: &ChannelID) -> &mut Buffer {
+    fn get_or_create_channel(&mut self, channel: &ChannelID) -> &mut FixedSizeBTree {
         self.data
             .entry(channel.clone())
-            .or_insert(Buffer::default())
+            .or_insert(FixedSizeBTree::default())
     }
+}
+
+fn cleanup_before(version: &DataVersion, buffer: &mut FixedSizeBTree) {
+    buffer.data.split_off(&version);
 }
 
 impl DataBuffer for BtreeBufferedData {
@@ -75,7 +116,9 @@ impl DataBuffer for BtreeBufferedData {
         &mut self,
         version: &PacketBufferAddress,
     ) -> Result<Option<UntypedPacket>, BufferError> {
-        Ok(self.get_channel(&version.0)?.remove(&version.1))
+        let data = self.get_channel(&version.0)?.remove(&version.1);
+        cleanup_before(&version.1, self.get_channel(&version.0)?);
+        Ok(data)
     }
 
     fn get(
@@ -97,96 +140,5 @@ impl DataBuffer for BtreeBufferedData {
 impl OrderedBuffer for BtreeBufferedData {
     fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool {
         self.data.contains_key(channel) && self.data.get(channel).unwrap().contains_key(version)
-    }
-}
-
-#[derive(Debug)]
-pub struct TimestampSynchronizer {
-    thread_handler: Option<JoinHandle<()>>,
-    send_event: Sender<Option<PacketBufferAddress>>,
-    receive_event: Receiver<Option<PacketBufferAddress>>,
-}
-
-impl TimestampSynchronizer {
-    pub fn default() -> Self {
-        let (send_event, receive_event) = unbounded::<Option<PacketBufferAddress>>();
-
-        TimestampSynchronizer {
-            thread_handler: None,
-            send_event,
-            receive_event,
-        }
-    }
-}
-
-fn synchronize(
-    ordered_buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-    available_channels: &Vec<ChannelID>,
-    data_version: &DataVersion,
-) -> Option<DataVersion> {
-    let buffer = ordered_buffer.lock().unwrap();
-    let is_data_available = available_channels
-        .iter()
-        .map(|channel_id| buffer.has_version(&channel_id, data_version))
-        .all(|has_version| has_version);
-    if is_data_available {
-        return Some(*data_version);
-    }
-    None
-}
-
-fn get_packets_for_version(
-    _data_version: &DataVersion,
-    _buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-) -> PacketSet {
-    PacketSet::default()
-}
-
-impl PacketSynchronizer for TimestampSynchronizer {
-    fn start(
-        &mut self,
-        buffer: Arc<Mutex<dyn OrderedBuffer>>,
-        work_queue: Arc<WorkQueue>,
-        node_id: usize,
-        available_channels: &Vec<ChannelID>,
-    ) -> () {
-        let mut buffer_thread = buffer.clone();
-        let available_channels = available_channels.clone();
-
-        let receive_thread = self.receive_event.clone();
-        let handler = thread::spawn(move || loop {
-            let result = receive_thread.recv_timeout(Duration::from_millis(100));
-            if let Err(RecvTimeoutError::Timeout) = result {
-                println!("ASDASD2");
-                continue;
-            }
-
-            let data = result.unwrap();
-            if data.is_none() {
-                return ();
-            }
-
-            let data = data.unwrap();
-
-            if let Some(data_version) =
-                synchronize(&mut buffer_thread, &available_channels, &data.1)
-            {
-                let packet_set = get_packets_for_version(&data_version, &mut buffer_thread);
-                work_queue.push(node_id, packet_set)
-            }
-        });
-        self.thread_handler = Some(handler);
-    }
-
-    fn stop(&mut self) -> () {
-        self.send_event.send(None).unwrap();
-        if self.thread_handler.is_some() {
-            self.thread_handler.take().unwrap().join();
-        }
-        ()
-    }
-
-    fn packet_event(&self, packet_address: PacketBufferAddress) {
-        self.send_event.send(Some(packet_address));
     }
 }

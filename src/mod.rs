@@ -1,4 +1,5 @@
 #![feature(get_mut_unchecked)]
+#![feature(is_some_and)]
 
 pub mod buffers;
 pub mod channels;
