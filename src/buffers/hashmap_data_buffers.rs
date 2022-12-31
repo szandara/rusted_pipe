@@ -1,4 +1,6 @@
 use super::synchronizers::PacketSynchronizer;
+use super::DataBuffer;
+use super::OrderedBuffer;
 
 use super::BufferError;
 use crate::packet::ChannelID;
@@ -26,24 +28,6 @@ use crate::packet::WorkQueue;
 #[derive(Default)]
 pub struct HashmapBufferedData {
     data: HashMap<PacketBufferAddress, UntypedPacket>,
-}
-
-pub trait DataBuffer: Sync + Send {
-    fn insert(
-        &mut self,
-        channel: &ChannelID,
-        packet: UntypedPacket,
-    ) -> Result<PacketBufferAddress, BufferError>;
-
-    fn consume(&mut self, version: &PacketBufferAddress) -> Option<UntypedPacket>;
-
-    fn get(&mut self, version: &PacketBufferAddress) -> Option<&UntypedPacket>;
-
-    fn available_channels(&self) -> Vec<ChannelID>;
-}
-
-pub trait OrderedBuffer: DataBuffer {
-    fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
 }
 
 impl DataBuffer for HashmapBufferedData {

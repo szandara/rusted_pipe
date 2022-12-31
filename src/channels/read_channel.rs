@@ -6,11 +6,9 @@ use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
 
 use super::{Packet, PacketView};
-use crate::buffers::data_buffers::{
-    DataBuffer, HashmapBufferedData, OrderedBuffer, TimestampSynchronizer,
-};
+use crate::buffers::hashmap_data_buffers::{HashmapBufferedData, TimestampSynchronizer};
 use crate::buffers::synchronizers::PacketSynchronizer;
-use crate::buffers::{PacketBufferAddress, PacketWithAddress};
+use crate::buffers::{DataBuffer, OrderedBuffer, PacketBufferAddress, PacketWithAddress};
 use crossbeam::channel::Receiver;
 use crossbeam::deque::Injector;
 use itertools::Itertools;

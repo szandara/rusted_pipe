@@ -1,6 +1,6 @@
 use crossbeam::deque::Injector;
 
-use super::data_buffers::OrderedBuffer;
+use super::OrderedBuffer;
 use super::PacketBufferAddress;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
