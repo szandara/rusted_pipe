@@ -2,22 +2,22 @@ use super::ChannelError;
 use super::UntypedReceiverChannel;
 
 use crate::packet::ChannelID;
-use crate::packet::DataVersion;
+
 use crate::packet::UntypedPacket;
 
-use super::{Packet, PacketView};
+
 use crate::buffers::hashmap_data_buffers::{HashmapBufferedData, TimestampSynchronizer};
 use crate::buffers::synchronizers::PacketSynchronizer;
-use crate::buffers::{DataBuffer, OrderedBuffer, PacketBufferAddress, PacketWithAddress};
+use crate::buffers::{DataBuffer, OrderedBuffer, PacketBufferAddress};
 use crossbeam::channel::Receiver;
-use crossbeam::deque::Injector;
+
 use itertools::Itertools;
 
-use crate::packet::PacketSet;
+
 use crate::packet::ReadEvent;
-use crate::packet::UntypedPacketCast;
+
 use crate::packet::WorkQueue;
-use indexmap::{map::Keys, IndexMap};
+use indexmap::{IndexMap};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

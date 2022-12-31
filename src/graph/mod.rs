@@ -12,7 +12,7 @@ use crossbeam::channel::Select;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::packet::{PacketSet, ReadEvent};
+use crate::packet::{PacketSet};
 
 use super::channels::{untyped_channel, ReadChannel, WriteChannel};
 use crate::packet::ChannelID;
