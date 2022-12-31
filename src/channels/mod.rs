@@ -74,11 +74,9 @@ impl UntypedSenderChannel {
     pub fn send<T: 'static>(&self, data: Packet<T>) -> Result<(), ChannelError> {
         match self.sender.send(data.to_untyped()) {
             Ok(res) => Ok(res),
-            Err(_err) => {
-                return Err(ChannelError::SendError(
-                    "Could not send because the channel is disconnected".to_string(),
-                ));
-            }
+            Err(_err) => Err(ChannelError::SendError(
+                "Could not send because the channel is disconnected".to_string(),
+            )),
         }
     }
 }

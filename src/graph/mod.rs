@@ -12,7 +12,7 @@ use crossbeam::channel::Select;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::packet::{PacketSet};
+use crate::packet::PacketSet;
 
 use super::channels::{untyped_channel, ReadChannel, WriteChannel};
 use crate::packet::ChannelID;
@@ -112,7 +112,7 @@ impl Graph {
         self.node_threads.push(thread::spawn(move || {
             consume(consume_running_thread, workers)
         }));
-        return handles;
+        handles
     }
 
     fn stop(&mut self) {
@@ -134,7 +134,7 @@ struct ProcessorWorker {
 fn consume(running: Arc<AtomicBool>, mut workers: Vec<ProcessorWorker>) {
     let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
 
-    while running.load(Ordering::Relaxed) == true {
+    while running.load(Ordering::Relaxed) {
         for worker in workers.iter_mut() {
             if worker.status.load(Ordering::SeqCst) == 0 {
                 let lock_status = worker.status.clone();
@@ -186,7 +186,7 @@ fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
         selector.recv(channel);
     }
 
-    while running.load(Ordering::Relaxed) == true {
+    while running.load(Ordering::Relaxed) {
         let channel_index = selector.ready();
         let _read_version = read_channel.try_read_index(channel_index);
     }
