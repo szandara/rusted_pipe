@@ -68,6 +68,10 @@ impl FixedSizeBTree {
     fn len(&self) -> usize {
         return self.data.len();
     }
+
+    fn cleanup_before(&mut self, version: &DataVersion) {
+        self.data = self.data.split_off(&version);
+    }
 }
 
 pub struct BtreeBufferedData {
@@ -100,10 +104,6 @@ impl BtreeBufferedData {
     }
 }
 
-fn cleanup_before(version: &DataVersion, buffer: &mut FixedSizeBTree) {
-    buffer.data.split_off(&version);
-}
-
 impl DataBuffer for BtreeBufferedData {
     fn insert(
         &mut self,
@@ -128,7 +128,7 @@ impl DataBuffer for BtreeBufferedData {
         version: &PacketBufferAddress,
     ) -> Result<Option<UntypedPacket>, BufferError> {
         let data = self.get_channel(&version.0)?.remove(&version.1);
-        cleanup_before(&version.1, self.get_channel(&version.0)?);
+        self.get_channel(&version.0)?.cleanup_before(&version.1);
         Ok(data)
     }
 
@@ -227,9 +227,12 @@ mod fixed_size_buffer_tests {
 
 #[cfg(test)]
 mod btree_buffer_tests {
+    use futures::channel::oneshot::channel;
+
     use super::*;
     use crate::channels::Packet;
     use crate::packet::UntypedPacketCast;
+    use rand::Rng;
     use std::cmp;
 
     #[test]
@@ -292,5 +295,42 @@ mod btree_buffer_tests {
             .get(&(channel_1.clone(), version.clone()))
             .unwrap()
             .is_none())
+    }
+
+    #[test]
+    fn test_buffer_insert_random_order_then_removes_old_data_once_consumed() {
+        let max_size = 20;
+        let mut buffer = BtreeBufferedData::new(max_size);
+
+        let channel_0 = ChannelID {
+            id: "ch0".to_string(),
+        };
+        let channel_1 = ChannelID {
+            id: "ch1".to_string(),
+        };
+        buffer.create_channel(&channel_0);
+        buffer.create_channel(&channel_1);
+
+        let mut rng = rand::thread_rng();
+        let vals: Vec<u64> = (0..100).map(|_| rng.gen_range(0..20)).collect();
+
+        for i in vals {
+            let version = DataVersion { timestamp: i };
+            let packet = Packet::<String>::new("test_0".to_string(), version.clone());
+            buffer.insert(&channel_0, packet.to_untyped());
+            let packet = Packet::<String>::new("test_1".to_string(), version.clone());
+            buffer.insert(&channel_1, packet.to_untyped());
+        }
+        let version = DataVersion { timestamp: 10 };
+        let address = (channel_0.clone(), version.clone());
+        let pair = buffer.consume(&address).unwrap().unwrap();
+
+        for old_version in 0..9 {
+            let version = DataVersion {
+                timestamp: old_version,
+            };
+            let address = (channel_0.clone(), version.clone());
+            assert!(buffer.get(&address).unwrap().is_none())
+        }
     }
 }
