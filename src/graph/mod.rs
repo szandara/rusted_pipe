@@ -26,6 +26,7 @@ pub struct Graph {
     nodes: IndexMap<String, Node>,
     running: Arc<AtomicBool>,
     node_threads: Vec<JoinHandle<()>>,
+    read_threads: Vec<JoinHandle<()>>,
 }
 
 impl Graph {
@@ -34,6 +35,7 @@ impl Graph {
             nodes: IndexMap::<String, Node>::default(),
             running: Arc::new(AtomicBool::new(false)),
             node_threads: Vec::<JoinHandle<()>>::default(),
+            read_threads: Vec::<JoinHandle<()>>::default(),
         }
     }
 
@@ -72,9 +74,8 @@ impl Graph {
         Ok(())
     }
 
-    pub fn start(&mut self) -> Vec<thread::JoinHandle<()>> {
+    pub fn start(&mut self) {
         let mut node_id = 0;
-        let mut handles = Vec::new();
         let mut workers = Vec::default();
         self.running.swap(true, Ordering::Relaxed);
 
@@ -91,7 +92,7 @@ impl Graph {
             read_channel.start(assigned_node_id, work_queue.clone());
 
             if !is_source {
-                handles.push(thread::spawn(move || {
+                self.read_threads.push(thread::spawn(move || {
                     read_channel_data(reading_running_thread, read_channel)
                 }));
             }
@@ -112,13 +113,15 @@ impl Graph {
         self.node_threads.push(thread::spawn(move || {
             consume(consume_running_thread, workers)
         }));
-        handles
     }
 
     fn stop(&mut self) {
         self.running.swap(false, Ordering::Relaxed);
         for n in 0..self.node_threads.len() {
             self.node_threads.remove(n).join().unwrap();
+        }
+        for n in 0..self.read_threads.len() {
+            self.read_threads.remove(n).join().unwrap();
         }
     }
 }
@@ -245,26 +248,18 @@ mod tests {
     use super::*;
     use crate::ChannelError;
     use crate::DataVersion;
+    use crossbeam::channel::unbounded;
+    use crossbeam::channel::Receiver;
+    use crossbeam::channel::Sender;
     use mockall::predicate::*;
     use mockall::*;
     use std::time::Duration;
+    use std::time::Instant;
 
-    #[automock]
-    trait MockConsumer {
-        fn handle(
-            &self,
-            _input: &PacketSet,
-            _output_channel: Arc<Mutex<WriteChannel>>,
-        ) -> Result<(), RustedPipeError>;
-    }
-
-    // Simple Testing Processors
     struct TestNodeProducer {
         id: String,
-    }
-    struct TestNodeConsumer {
-        id: String,
-        mock_object: MockMockConsumer,
+        produce_time_ms: u64,
+        max_packets: usize,
     }
 
     impl Processor for TestNodeProducer {
@@ -282,9 +277,8 @@ mod tests {
                     &DataVersion { timestamp: 1 },
                 )
                 .unwrap();
-            Err(super::RustedPipeError::ChannelError(
-                ChannelError::EndOfStreamError(ChannelID::from("output_channel0")),
-            ))
+            thread::sleep(Duration::from_millis(self.produce_time_ms));
+            Ok(())
         }
 
         fn id(&self) -> &String {
@@ -292,29 +286,15 @@ mod tests {
         }
     }
 
+    struct TestNodeConsumer {
+        id: String,
+        output: Sender<PacketSet>,
+    }
     impl TestNodeConsumer {
-        fn new() -> Self {
-            let mut mock_object = MockMockConsumer::new();
-            let mock_result: Result<(), RustedPipeError> = Ok(());
-            mock_object
-                .expect_handle()
-                .times(1)
-                .withf(
-                    |_input: &PacketSet, _output_channel: &Arc<Mutex<WriteChannel>>| {
-                        _input.channels() == 2
-                            && *_input.get::<String>(0).unwrap().data == "Test".to_string()
-                            && *_input.get::<String>(1).unwrap().data == "Test".to_string()
-                            && _input.get::<String>(1).unwrap().version
-                                == DataVersion { timestamp: 1 }
-                            && _input.get::<String>(0).unwrap().version
-                                == DataVersion { timestamp: 1 }
-                    },
-                )
-                .return_const(mock_result.clone());
-
+        fn new(output: Sender<PacketSet>) -> Self {
             TestNodeConsumer {
                 id: "consumer".to_string(),
-                mock_object,
+                output,
             }
         }
     }
@@ -325,12 +305,8 @@ mod tests {
             _input: PacketSet,
             _output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
-            self.mock_object
-                .handle(&_input, _output_channel.clone())
-                .ok();
-            Err(super::RustedPipeError::ChannelError(
-                ChannelError::EndOfStreamError(ChannelID::from("output_channel0")),
-            ))
+            self.output.send(_input);
+            Ok(())
         }
 
         fn id(&self) -> &String {
@@ -338,21 +314,18 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_linked_nodes_can_send_and_receive_data() {
-        let node0 = TestNodeProducer {
-            id: "producer1".to_string(),
-        };
+    fn setup_test(
+        node0: TestNodeProducer,
+        node1: TestNodeProducer,
+    ) -> (Graph, Receiver<PacketSet>) {
         let node0 = Arc::new(node0);
         let node0 = Node::new(node0);
 
-        let node1 = TestNodeProducer {
-            id: "producer2".to_string(),
-        };
         let node1 = Arc::new(node1);
         let node1 = Node::new(node1);
 
-        let process_terminal = TestNodeConsumer::new();
+        let (output, output_check) = unbounded();
+        let process_terminal = TestNodeConsumer::new(output.clone());
         let mut process_terminal_handler = Arc::new(process_terminal);
         let process_terminal = Node::new(process_terminal_handler.clone());
 
@@ -379,17 +352,93 @@ mod tests {
             )
             .unwrap();
 
-        let processors = graph.start();
-        thread::sleep(Duration::from_millis(400));
+        return (graph, output_check);
+    }
+
+    fn check_results(results: &Vec<PacketSet>, max_packets: usize) {
+        assert_eq!(results.len(), max_packets);
+        for result in results {
+            assert_eq!(result.channels(), 2);
+            assert_eq!(*result.get::<String>(0).unwrap().data, "Test".to_string());
+            assert_eq!(*result.get::<String>(1).unwrap().data, "Test".to_string());
+            assert_eq!(
+                result.get::<String>(0).unwrap().version,
+                DataVersion { timestamp: 1 }
+            );
+            assert_eq!(
+                result.get::<String>(1).unwrap().version,
+                DataVersion { timestamp: 1 }
+            );
+        }
+    }
+
+    #[test]
+    fn test_linked_nodes_can_send_and_receive_data() {
+        let max_packets = 100;
+        let mock_processing_time_ms = 3;
+
+        let node0 = TestNodeProducer {
+            id: "producer1".to_string(),
+            produce_time_ms: mock_processing_time_ms,
+            max_packets: max_packets,
+        };
+        let node1 = TestNodeProducer {
+            id: "producer2".to_string(),
+            produce_time_ms: mock_processing_time_ms,
+            max_packets: max_packets,
+        };
+
+        let (mut graph, output_check) = setup_test(node0, node1);
+
+        let mut results = Vec::with_capacity(max_packets);
+        let deadline = Instant::now() + Duration::from_millis(350);
+        graph.start();
+
+        for i in 0..max_packets {
+            let data = output_check.recv_deadline(deadline);
+            if data.is_err() {
+                break;
+            }
+            results.push(data.unwrap());
+        }
+
+        check_results(&results, max_packets);
+
         graph.stop();
-        for processor in processors {
-            let join_result = processor.join();
-            assert!(join_result.is_ok(), "{:?}", join_result.err().unwrap());
+    }
+
+    #[test]
+    fn test_linked_nodes_can_send_and_receive_data_different_produce_speed() {
+        let max_packets = 10;
+        let mock_processing_time_ms = 3;
+        let collection_time_ms: u64 = 350;
+
+        let node0 = TestNodeProducer {
+            id: "producer1".to_string(),
+            produce_time_ms: mock_processing_time_ms * 10,
+            max_packets: max_packets,
+        };
+        let node1 = TestNodeProducer {
+            id: "producer2".to_string(),
+            produce_time_ms: mock_processing_time_ms,
+            max_packets: max_packets,
+        };
+
+        let (mut graph, output_check) = setup_test(node0, node1);
+
+        let mut results = Vec::with_capacity(max_packets);
+        let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
+
+        graph.start();
+
+        for i in 0..max_packets {
+            let data = output_check.recv_deadline(deadline);
+            if data.is_err() {
+                break;
+            }
+            results.push(data.unwrap());
         }
-        unsafe {
-            Arc::get_mut_unchecked(&mut process_terminal_handler)
-                .mock_object
-                .checkpoint();
-        }
+
+        check_results(&results, max_packets);
     }
 }

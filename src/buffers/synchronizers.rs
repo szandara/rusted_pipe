@@ -109,7 +109,6 @@ impl PacketSynchronizer for TimestampSynchronizer {
         let handler = thread::spawn(move || loop {
             let result = receive_thread.recv_timeout(Duration::from_millis(100));
             if let Err(RecvTimeoutError::Timeout) = result {
-                println!("ASDASD2");
                 continue;
             }
 
