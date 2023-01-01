@@ -68,6 +68,10 @@ impl DataBuffer for HashmapBufferedData {
             .map(|key| key.0.clone())
             .collect_vec()
     }
+
+    fn create_channel(&mut self, channel: &ChannelID) -> Result<ChannelID, BufferError> {
+        Ok(channel.clone())
+    }
 }
 
 impl OrderedBuffer for HashmapBufferedData {

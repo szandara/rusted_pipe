@@ -13,6 +13,8 @@ pub type PacketWithAddress = (PacketBufferAddress, UntypedPacket);
 pub enum BufferError {
     #[error("Data was received in channel {0:?} with an already existing version.")]
     DuplicateDataVersionError(PacketBufferAddress),
+    #[error("Trying to create a channel which already exists {0:?}.")]
+    DuplicateChannelError(ChannelID),
     #[error("Problem while processing data: {0:?}.")]
     InternalError(String),
 }
@@ -33,6 +35,8 @@ pub trait DataBuffer: Sync + Send {
         -> Result<Option<&UntypedPacket>, BufferError>;
 
     fn available_channels(&self) -> Vec<ChannelID>;
+
+    fn create_channel(&mut self, channel: &ChannelID) -> Result<ChannelID, BufferError>;
 }
 
 pub trait OrderedBuffer: DataBuffer {

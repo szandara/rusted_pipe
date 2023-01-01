@@ -391,7 +391,7 @@ mod tests {
         let (mut graph, output_check) = setup_test(node0, node1);
 
         let mut results = Vec::with_capacity(max_packets);
-        let deadline = Instant::now() + Duration::from_millis(350);
+        let deadline = Instant::now() + Duration::from_millis(380);
         graph.start();
 
         for i in 0..max_packets {

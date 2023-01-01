@@ -1,6 +1,7 @@
 use super::ChannelError;
 use super::UntypedReceiverChannel;
 
+use crate::buffers::BufferError;
 use crate::packet::ChannelID;
 
 use crate::packet::UntypedPacket;
@@ -29,17 +30,20 @@ pub struct ReadChannel {
     synch_strategy: Box<dyn PacketSynchronizer>,
     channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
     channel_index: HashMap<ChannelID, usize>,
+    initialized: bool,
 }
 
 unsafe impl Send for ReadEvent {}
+const MAX_BUFFER_PER_CHANNEL: usize = 1000;
 
 impl ReadChannel {
     pub fn default() -> Self {
         ReadChannel {
-            buffered_data: Arc::new(Mutex::new(BtreeBufferedData::default())),
+            buffered_data: Arc::new(Mutex::new(BtreeBufferedData::new(MAX_BUFFER_PER_CHANNEL))),
             synch_strategy: Box::new(TimestampSynchronizer::default()),
             channels: Default::default(),
             channel_index: Default::default(),
+            initialized: false,
         }
     }
 
@@ -52,13 +56,23 @@ impl ReadChannel {
             synch_strategy,
             channels: Default::default(),
             channel_index: Default::default(),
+            initialized: false,
         }
     }
 
-    pub fn add_channel(&mut self, channel_id: &ChannelID, receiver: UntypedReceiverChannel) {
+    pub fn add_channel(
+        &mut self,
+        channel_id: &ChannelID,
+        receiver: UntypedReceiverChannel,
+    ) -> Result<ChannelID, ChannelError> {
         self.channels.insert(channel_id.clone(), receiver);
         self.channel_index
             .insert(channel_id.clone(), self.channels.len() - 1);
+        self.buffered_data
+            .lock()
+            .unwrap()
+            .create_channel(channel_id)?;
+        Ok(channel_id.clone())
     }
 
     pub fn selector<'b, 'a>(&'a self) -> Vec<Receiver<UntypedPacket>> {
