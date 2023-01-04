@@ -125,6 +125,23 @@ impl PacketSet {
         }
     }
 
+    pub fn get_owned<T: 'static>(
+        &mut self,
+        channel_number: usize,
+    ) -> Result<Packet<T>, PacketError> {
+        match self
+            .data
+            .swap_remove_index(channel_number)
+            .ok_or(PacketError::MissingChannelIndex(channel_number))?
+            .1
+        {
+            Some(maybe_packet_with_address) => {
+                Ok(maybe_packet_with_address.1.deref_owned::<T>()?)
+            }
+            None => Err(PacketError::MissingChannelData(channel_number)),
+        }
+    }
+
     pub fn get_channel<T: 'static>(
         &self,
         channel_id: &ChannelID,

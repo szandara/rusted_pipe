@@ -1,0 +1,4 @@
+strict digraph test {
+    source1 -> sink
+    source2 -> sink
+}

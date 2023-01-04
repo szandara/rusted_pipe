@@ -1,3 +1,6 @@
+mod formatter;
+mod test_nodes;
+
 use std::fmt;
 
 use std::sync::Arc;
@@ -265,7 +268,7 @@ mod tests {
     impl Processor for TestNodeProducer {
         fn handle(
             &self,
-            _input: PacketSet,
+            mut _input: PacketSet,
             output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
             output_channel
@@ -302,7 +305,7 @@ mod tests {
     impl Processor for TestNodeConsumer {
         fn handle(
             &self,
-            _input: PacketSet,
+            mut _input: PacketSet,
             _output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
             self.output.send(_input);
