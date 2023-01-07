@@ -52,28 +52,34 @@ fn synchronize(
     ordered_buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
     available_channels: &Vec<ChannelID>,
     data_version: &DataVersion,
-) -> Option<DataVersion> {
+) -> Option<Vec<PacketBufferAddress>> {
     let buffer = ordered_buffer.lock().unwrap();
-    let is_data_available = available_channels
-        .iter()
-        .map(|channel_id| buffer.has_version(&channel_id, data_version))
-        .all(|has_version| has_version);
-    if is_data_available {
-        return Some(*data_version);
+    let is_data_available: Vec<PacketBufferAddress> = available_channels
+        .into_iter()
+        .map(|channel_id| {
+            if buffer.has_version(&channel_id, data_version) {
+                return Some((channel_id.clone(), data_version.clone()));
+            }
+            None
+        })
+        .flatten()
+        .collect();
+
+    if is_data_available.len() == available_channels.len() {
+        return Some(is_data_available);
     }
     None
 }
 
 fn get_packets_for_version(
-    data_version: &DataVersion,
+    data_versions: &Vec<PacketBufferAddress>,
     buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
 ) -> PacketSet {
     let mut buffer_locked = buffer.lock().unwrap();
-    let channels: Vec<ChannelID> = buffer_locked.available_channels().clone();
 
-    let packet_set = channels
+    let packet_set = data_versions
         .iter()
-        .map(|channel_id| {
+        .map(|(channel_id, data_version)| {
             let removed_packet = buffer_locked.consume(&(channel_id.clone(), data_version.clone()));
             if removed_packet.is_err() {
                 eprintln!(
@@ -119,10 +125,10 @@ impl PacketSynchronizer for TimestampSynchronizer {
 
             let data = data.unwrap();
 
-            if let Some(data_version) =
+            if let Some(data_versions) =
                 synchronize(&mut buffer_thread, &available_channels, &data.1)
             {
-                let packet_set = get_packets_for_version(&data_version, &mut buffer_thread);
+                let packet_set = get_packets_for_version(&data_versions, &mut buffer_thread);
                 work_queue.push(node_id, packet_set)
             }
         });
@@ -132,12 +138,12 @@ impl PacketSynchronizer for TimestampSynchronizer {
     fn stop(&mut self) -> () {
         self.send_event.send(None).unwrap();
         if self.thread_handler.is_some() {
-            self.thread_handler.take().unwrap().join();
+            self.thread_handler.take().unwrap().join().unwrap();
         }
         ()
     }
 
     fn packet_event(&self, packet_address: PacketBufferAddress) {
-        self.send_event.send(Some(packet_address));
+        self.send_event.send(Some(packet_address)).unwrap();
     }
 }

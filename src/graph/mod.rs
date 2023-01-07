@@ -23,7 +23,11 @@ use crate::packet::ChannelID;
 use super::RustedPipeError;
 use indexmap::IndexMap;
 
-type ProcessorSafe = Arc<dyn Processor>;
+type ProcessorSafe = Arc<Mutex<dyn Processor>>;
+
+fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue) -> Node {
+    Node::new(Arc::new(Mutex::new(processor)), work_queue)
+}
 
 pub struct Graph {
     nodes: IndexMap<String, Node>,
@@ -72,7 +76,8 @@ impl Graph {
 
         receiver_node
             .read_channel
-            .add_channel(to_port, channel_receiver);
+            .add_channel(to_port, channel_receiver)
+            .unwrap();
 
         Ok(())
     }
@@ -85,10 +90,11 @@ impl Graph {
         while !self.nodes.is_empty() {
             let processor = self.nodes.pop().unwrap();
 
-            let (_id, is_source, write_channel, mut read_channel, handler) = processor.1.start();
+            let (_id, is_source, write_channel, mut read_channel, handler, work_queue) =
+                processor.1.start();
 
             let assigned_node_id = node_id;
-            let work_queue = Arc::new(WorkQueue::default());
+            let work_queue = Arc::new(work_queue);
             let arc_write_channel = Arc::new(Mutex::new(write_channel));
             let reading_running_thread = self.running.clone();
 
@@ -131,29 +137,29 @@ impl Graph {
 
 struct ProcessorWorker {
     work_queue: Arc<WorkQueue>,
-    processor: Arc<dyn Processor>,
+    processor: ProcessorSafe,
     write_channel: Arc<Mutex<WriteChannel>>,
     status: Arc<AtomicUsize>,
     is_source: bool,
 }
 
-fn consume(running: Arc<AtomicBool>, mut workers: Vec<ProcessorWorker>) {
+fn consume(running: Arc<AtomicBool>, workers: Vec<ProcessorWorker>) {
     let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
 
     while running.load(Ordering::Relaxed) {
-        for worker in workers.iter_mut() {
+        for worker in workers.iter() {
             if worker.status.load(Ordering::SeqCst) == 0 {
                 let lock_status = worker.status.clone();
-                let mutex_processor = Mutex::new(worker.processor.clone());
                 let arc_write_channel = worker.write_channel.clone();
-
+                let worker_clone = worker.processor.clone();
                 if worker.is_source {
                     worker.status.store(1, Ordering::SeqCst);
                     let future = async move {
-                        mutex_processor
+                        worker_clone
                             .lock()
                             .unwrap()
-                            .handle(PacketSet::default(), arc_write_channel);
+                            .handle(PacketSet::default(), arc_write_channel)
+                            .unwrap();
                         lock_status.store(0, Ordering::SeqCst);
                     };
 
@@ -164,10 +170,11 @@ fn consume(running: Arc<AtomicBool>, mut workers: Vec<ProcessorWorker>) {
                     if let Some(read_event) = task.success() {
                         worker.status.store(1, Ordering::SeqCst);
                         let future = async move {
-                            mutex_processor
+                            worker_clone
                                 .lock()
                                 .unwrap()
-                                .handle(read_event.packet_data, arc_write_channel);
+                                .handle(read_event.packet_data, arc_write_channel)
+                                .unwrap();
 
                             lock_status.store(0, Ordering::SeqCst);
                         };
@@ -207,6 +214,7 @@ pub struct Node {
     write_channel: WriteChannel,
     read_channel: ReadChannel,
     handler: ProcessorSafe,
+    work_queue: WorkQueue,
 }
 
 impl fmt::Debug for Node {
@@ -216,71 +224,109 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    fn new(handler: ProcessorSafe) -> Self {
+    fn new(handler: ProcessorSafe, work_queue: WorkQueue) -> Self {
         Node {
-            id: handler.id().clone(),
+            id: handler.lock().unwrap().id().clone(),
             is_source: true,
             write_channel: WriteChannel::default(),
             read_channel: ReadChannel::default(),
-            handler,
+            handler: handler.clone(),
+            work_queue,
         }
     }
 
-    fn start(self) -> (String, bool, WriteChannel, ReadChannel, ProcessorSafe) {
+    fn start(
+        self,
+    ) -> (
+        String,
+        bool,
+        WriteChannel,
+        ReadChannel,
+        ProcessorSafe,
+        WorkQueue,
+    ) {
         (
             self.id,
             self.is_source,
             self.write_channel,
             self.read_channel,
             self.handler,
+            self.work_queue,
         )
     }
 }
 
 pub trait Processor: Sync + Send {
     fn handle(
-        &self,
+        &mut self,
         input: PacketSet,
         output: Arc<Mutex<WriteChannel>>,
     ) -> Result<(), RustedPipeError>;
+
     fn id(&self) -> &String;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ChannelError;
+
     use crate::DataVersion;
     use crossbeam::channel::unbounded;
     use crossbeam::channel::Receiver;
     use crossbeam::channel::Sender;
-    use mockall::predicate::*;
-    use mockall::*;
     use std::time::Duration;
     use std::time::Instant;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestNodeProducer {
         id: String,
         produce_time_ms: u64,
         max_packets: usize,
+        counter: usize,
+    }
+
+    impl TestNodeProducer {
+        fn new(id: String, produce_time_ms: u64, max_packets: usize) -> Self {
+            TestNodeProducer {
+                id,
+                produce_time_ms,
+                max_packets,
+                counter: 0,
+            }
+        }
     }
 
     impl Processor for TestNodeProducer {
         fn handle(
-            &self,
+            &mut self,
             mut _input: PacketSet,
             output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
+            thread::sleep(Duration::from_millis(self.produce_time_ms));
+            let s = SystemTime::now();
             output_channel
                 .lock()
                 .unwrap()
                 .write::<String>(
                     &ChannelID::from("output_channel0"),
                     "Test".to_string(),
-                    &DataVersion { timestamp: 1 },
+                    &DataVersion {
+                        timestamp: self.counter as u64,
+                    },
                 )
                 .unwrap();
-            thread::sleep(Duration::from_millis(self.produce_time_ms));
+            let e = SystemTime::now().duration_since(s).unwrap();
+            println!(
+                "P {}, Sending {} at {} in {}",
+                self.id,
+                self.counter,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_nanos(),
+                e.as_nanos()
+            );
+            self.counter += 1;
             Ok(())
         }
 
@@ -292,23 +338,36 @@ mod tests {
     struct TestNodeConsumer {
         id: String,
         output: Sender<PacketSet>,
+        counter: u32,
+        consume_time_ms: u64,
     }
     impl TestNodeConsumer {
-        fn new(output: Sender<PacketSet>) -> Self {
+        fn new(output: Sender<PacketSet>, consume_time_ms: u64) -> Self {
             TestNodeConsumer {
                 id: "consumer".to_string(),
                 output,
+                consume_time_ms,
+                counter: 0,
             }
         }
     }
 
     impl Processor for TestNodeConsumer {
         fn handle(
-            &self,
+            &mut self,
             mut _input: PacketSet,
             _output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
-            self.output.send(_input);
+            println!(
+                "Receved {} at {}",
+                self.counter,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis()
+            );
+            self.output.send(_input).unwrap();
+            thread::sleep(Duration::from_millis(self.consume_time_ms));
             Ok(())
         }
 
@@ -317,20 +376,18 @@ mod tests {
         }
     }
 
-    fn setup_test(
+    fn setup_default_test(
         node0: TestNodeProducer,
         node1: TestNodeProducer,
+        consume_time_ms: u64,
+        consumer_queue_strategy: WorkQueue,
     ) -> (Graph, Receiver<PacketSet>) {
-        let node0 = Arc::new(node0);
-        let node0 = Node::new(node0);
-
-        let node1 = Arc::new(node1);
-        let node1 = Node::new(node1);
+        let node0 = new_node(node0, WorkQueue::default());
+        let node1 = new_node(node1, WorkQueue::default());
 
         let (output, output_check) = unbounded();
-        let process_terminal = TestNodeConsumer::new(output.clone());
-        let mut process_terminal_handler = Arc::new(process_terminal);
-        let process_terminal = Node::new(process_terminal_handler.clone());
+        let process_terminal = TestNodeConsumer::new(output.clone(), consume_time_ms);
+        let process_terminal = new_node(process_terminal, consumer_queue_strategy);
 
         let mut graph = Graph::new();
 
@@ -364,14 +421,6 @@ mod tests {
             assert_eq!(result.channels(), 2);
             assert_eq!(*result.get::<String>(0).unwrap().data, "Test".to_string());
             assert_eq!(*result.get::<String>(1).unwrap().data, "Test".to_string());
-            assert_eq!(
-                result.get::<String>(0).unwrap().version,
-                DataVersion { timestamp: 1 }
-            );
-            assert_eq!(
-                result.get::<String>(1).unwrap().version,
-                DataVersion { timestamp: 1 }
-            );
         }
     }
 
@@ -380,21 +429,21 @@ mod tests {
         let max_packets = 100;
         let mock_processing_time_ms = 3;
 
-        let node0 = TestNodeProducer {
-            id: "producer1".to_string(),
-            produce_time_ms: mock_processing_time_ms,
-            max_packets: max_packets,
-        };
-        let node1 = TestNodeProducer {
-            id: "producer2".to_string(),
-            produce_time_ms: mock_processing_time_ms,
-            max_packets: max_packets,
-        };
+        let node0 = TestNodeProducer::new(
+            "producer1".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+        let node1 = TestNodeProducer::new(
+            "producer2".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
 
-        let (mut graph, output_check) = setup_test(node0, node1);
+        let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
-        let deadline = Instant::now() + Duration::from_millis(380);
+        let deadline = Instant::now() + Duration::from_millis(390);
         graph.start();
 
         for i in 0..max_packets {
@@ -414,20 +463,20 @@ mod tests {
     fn test_linked_nodes_can_send_and_receive_data_different_produce_speed() {
         let max_packets = 10;
         let mock_processing_time_ms = 3;
-        let collection_time_ms: u64 = 350;
+        let collection_time_ms: u64 = 400;
 
-        let node0 = TestNodeProducer {
-            id: "producer1".to_string(),
-            produce_time_ms: mock_processing_time_ms * 10,
-            max_packets: max_packets,
-        };
-        let node1 = TestNodeProducer {
-            id: "producer2".to_string(),
-            produce_time_ms: mock_processing_time_ms,
-            max_packets: max_packets,
-        };
+        let node0 = TestNodeProducer::new(
+            "producer1".to_string(),
+            mock_processing_time_ms * 10,
+            max_packets,
+        );
+        let node1 = TestNodeProducer::new(
+            "producer2".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
 
-        let (mut graph, output_check) = setup_test(node0, node1);
+        let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
         let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
@@ -443,5 +492,59 @@ mod tests {
         }
 
         check_results(&results, max_packets);
+    }
+
+    #[test]
+    fn test_slow_consumers_data_is_dropped_real_time_queue() {
+        let max_packets = 3;
+        let mock_processing_time_ms = 4;
+        let collection_time_ms: u64 = 600;
+
+        let node0 = TestNodeProducer::new(
+            "producer1".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+        let node1 = TestNodeProducer::new(
+            "producer2".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+
+        let (mut graph, output_check) = setup_default_test(node0, node1, 100, WorkQueue::new(1));
+
+        let mut results = Vec::with_capacity(max_packets);
+        let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
+
+        graph.start();
+
+        for i in 0..max_packets {
+            let data = output_check.recv_deadline(deadline);
+            if data.is_err() {
+                break;
+            }
+            results.push(data.unwrap());
+        }
+
+        check_results(&results, max_packets);
+
+        let expected_versions: Vec<u64> = vec![5, 22, 42];
+        for (i, expected_version) in expected_versions.into_iter().enumerate() {
+            let v1 = results[i].get::<String>(0).unwrap().version.timestamp;
+            let v2 = results[i].get::<String>(1).unwrap().version.timestamp;
+            let range = ((expected_version - 5)..(expected_version + 5)).collect::<Vec<u64>>();
+            assert!(
+                range.contains(&v1),
+                "V1 {} not in expected_version {}",
+                v1,
+                expected_version
+            );
+            assert!(
+                range.contains(&v2),
+                "V2 {} not in expected_version {}",
+                v2,
+                expected_version
+            );
+        }
     }
 }

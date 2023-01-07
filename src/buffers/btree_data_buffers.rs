@@ -1,27 +1,14 @@
-use super::synchronizers::PacketSynchronizer;
-
 use super::BufferError;
 use super::DataBuffer;
 use super::OrderedBuffer;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
-use crate::packet::{PacketSet, UntypedPacket};
-use crossbeam::channel::Receiver;
-use crossbeam::channel::RecvTimeoutError;
-use crossbeam::channel::{unbounded, Sender};
+use crate::packet::UntypedPacket;
 
 use itertools::Itertools;
 
-use std::sync::{Arc, Mutex};
-use std::thread;
-
-use std::collections::HashMap;
-use std::thread::JoinHandle;
-use std::time::Duration;
-
 use super::PacketBufferAddress;
-
-use crate::packet::WorkQueue;
+use std::collections::HashMap;
 
 use std::collections::BTreeMap;
 

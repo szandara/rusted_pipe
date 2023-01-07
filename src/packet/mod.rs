@@ -1,4 +1,5 @@
 use std::any::{Any, TypeId};
+use std::default;
 use std::marker::Copy;
 
 use crossbeam::deque::{Injector, Steal};
@@ -164,17 +165,35 @@ pub struct ReadEvent {
     pub packet_data: PacketSet,
 }
 
-#[derive(Default)]
 pub struct WorkQueue {
     queue: Injector<ReadEvent>,
+    max_in_queue: usize,
 }
 
 impl WorkQueue {
+    pub fn default() -> Self {
+        WorkQueue {
+            queue: Injector::<ReadEvent>::default(),
+            max_in_queue: std::usize::MAX,
+        }
+    }
+
+    pub fn new(max_in_queue: usize) -> Self {
+        WorkQueue {
+            queue: Injector::<ReadEvent>::default(),
+            max_in_queue,
+        }
+    }
+
     pub fn push(&self, node_id: usize, packet_set: PacketSet) {
         self.queue.push(ReadEvent {
             processor_index: node_id,
             packet_data: packet_set,
-        })
+        });
+
+        while self.queue.len() > self.max_in_queue {
+            self.queue.steal().is_success();
+        }
     }
 
     pub fn steal(&self) -> Steal<ReadEvent> {
