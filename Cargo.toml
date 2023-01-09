@@ -29,7 +29,9 @@ indexmap = {version = "1.7.0"}
 rayon = {version = "1.5.1"}
 graphviz-rust = {version = "^0.5"}
 st3 = {version = "^0.4.1"}
-
+ring-channel = {version = "^0.11.0"}
+ringbuf = { version = "^0.3.1" }
+paste = { version = "^1.0.11" }
 # Test packages
 # opencv = "0.74"
 

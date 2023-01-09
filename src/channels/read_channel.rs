@@ -1,17 +1,15 @@
 use super::ChannelError;
 use super::UntypedReceiverChannel;
 
-use crate::buffers::BufferError;
 use crate::packet::ChannelID;
 
 use crate::packet::UntypedPacket;
 
 use crate::buffers::btree_data_buffers::BtreeBufferedData;
-use crate::buffers::hashmap_data_buffers::HashmapBufferedData;
 use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::synchronizers::TimestampSynchronizer;
 
-use crate::buffers::{DataBuffer, OrderedBuffer, PacketBufferAddress};
+use crate::buffers::{OrderedBuffer, PacketBufferAddress};
 use crossbeam::channel::Receiver;
 
 use itertools::Itertools;
@@ -30,7 +28,6 @@ pub struct ReadChannel {
     synch_strategy: Box<dyn PacketSynchronizer>,
     channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
     channel_index: HashMap<ChannelID, usize>,
-    initialized: bool,
 }
 
 unsafe impl Send for ReadEvent {}
@@ -43,7 +40,6 @@ impl ReadChannel {
             synch_strategy: Box::new(TimestampSynchronizer::default()),
             channels: Default::default(),
             channel_index: Default::default(),
-            initialized: false,
         }
     }
 
@@ -56,7 +52,6 @@ impl ReadChannel {
             synch_strategy,
             channels: Default::default(),
             channel_index: Default::default(),
-            initialized: false,
         }
     }
 
@@ -160,7 +155,9 @@ mod tests {
         let mut read_channel = ReadChannel::default();
         assert_eq!(read_channel.available_channels().len(), 0);
         let crossbeam_channels = untyped_channel();
-        read_channel.add_channel(&ChannelID::from("test_channel_1"), crossbeam_channels.1);
+        read_channel
+            .add_channel(&ChannelID::from("test_channel_1"), crossbeam_channels.1)
+            .unwrap();
 
         (read_channel, crossbeam_channels.0)
     }
@@ -175,7 +172,9 @@ mod tests {
         );
 
         let crossbeam_channels = untyped_channel();
-        read_channel.add_channel(&ChannelID::from("test3"), crossbeam_channels.1);
+        read_channel
+            .add_channel(&ChannelID::from("test3"), crossbeam_channels.1)
+            .unwrap();
         assert_eq!(read_channel.available_channels().len(), 2);
         assert_eq!(
             read_channel.available_channels(),

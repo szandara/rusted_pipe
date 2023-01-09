@@ -32,7 +32,7 @@ impl PartialEq for DataVersion {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct PacketBase<T> {
     pub data: T,
     pub version: DataVersion,

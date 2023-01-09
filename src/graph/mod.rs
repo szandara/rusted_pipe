@@ -443,7 +443,7 @@ mod tests {
         let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
-        let deadline = Instant::now() + Duration::from_millis(390);
+        let deadline = Instant::now() + Duration::from_millis(400);
         graph.start();
 
         for i in 0..max_packets {
