@@ -201,9 +201,9 @@ fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
 
     while running.load(Ordering::Relaxed) {
         let channel_index = selector.ready();
-        let read_index = read_channel.try_read_index(channel_index);
-        if read_index.is_err() {
-            eprintln!("Exception while reading {:?}. Skipping", read_index);
+        match read_channel.try_read_index(channel_index) {
+            Ok(_) => (),
+            Err(err) => eprintln!("Exception while reading {:?}. Skipping", err),
         }
     }
     read_channel.stop();

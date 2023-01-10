@@ -5,13 +5,13 @@ use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, Rin
 type _RingBuffer = AllocRingBuffer<UntypedPacket>;
 
 pub trait FixedSizeBuffer {
-    fn new(max_size: usize) -> Self;
+    fn new(max_size: usize, block_full: bool) -> Self;
 
     fn contains_key(&self, version: &DataVersion) -> bool;
 
     fn get(&self, version: &DataVersion) -> Option<&UntypedPacket>;
 
-    fn insert(&mut self, version: DataVersion, packet: UntypedPacket);
+    fn insert(&mut self, version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError>;
 
     fn len(&self) -> usize;
 
@@ -22,6 +22,7 @@ pub trait FixedSizeBuffer {
 
 pub struct RtRingBuffer {
     buffer: _RingBuffer,
+    block_full: bool,
 }
 
 impl RtRingBuffer {
@@ -31,12 +32,13 @@ impl RtRingBuffer {
 }
 
 impl FixedSizeBuffer for RtRingBuffer {
-    fn new(mut max_size: usize) -> Self {
+    fn new(mut max_size: usize, block_full: bool) -> Self {
         if !max_size.is_power_of_two() {
             max_size = (2 as usize).pow(max_size.ilog2() / (2 as usize).ilog2() + 1);
         }
         return RtRingBuffer {
             buffer: _RingBuffer::with_capacity(max_size),
+            block_full,
         };
     }
 
@@ -48,8 +50,12 @@ impl FixedSizeBuffer for RtRingBuffer {
         self.find_version(version)
     }
 
-    fn insert(&mut self, _version: DataVersion, packet: UntypedPacket) {
+    fn insert(&mut self, _version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError> {
+        if self.buffer.capacity() <= 0 {
+            return Err(BufferError::BufferFull);
+        }
         self.buffer.push(packet);
+        Ok(())
     }
 
     fn len(&self) -> usize {
@@ -70,9 +76,12 @@ impl FixedSizeBuffer for RtRingBuffer {
 
 use std::collections::BTreeMap;
 
+use super::BufferError;
+
 pub struct FixedSizeBTree {
     data: BTreeMap<DataVersion, UntypedPacket>,
     max_size: usize,
+    block_full: bool,
 }
 
 impl FixedSizeBTree {
@@ -80,15 +89,17 @@ impl FixedSizeBTree {
         FixedSizeBTree {
             data: Default::default(),
             max_size: 1000,
+            block_full: false,
         }
     }
 }
 
 impl FixedSizeBuffer for FixedSizeBTree {
-    fn new(max_size: usize) -> Self {
+    fn new(max_size: usize, block_full: bool) -> Self {
         FixedSizeBTree {
             data: Default::default(),
-            max_size: max_size,
+            max_size,
+            block_full,
         }
     }
     fn contains_key(&self, version: &DataVersion) -> bool {
@@ -99,11 +110,15 @@ impl FixedSizeBuffer for FixedSizeBTree {
         self.data.get(version)
     }
 
-    fn insert(&mut self, version: DataVersion, packet: UntypedPacket) {
+    fn insert(&mut self, version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError> {
         self.data.insert(version, packet);
+        if self.block_full {
+            return Err(BufferError::BufferFull);
+        }
         while self.data.len() > self.max_size {
             self.data.pop_first();
         }
+        Ok(())
     }
 
     fn len(&self) -> usize {
@@ -154,7 +169,7 @@ mod fixed_size_buffer_tests {
     }
 
     fn test_buffer_inserts_and_drops_data_if_past_capacity<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(20);
+        let mut buffer = T::new(20, false);
         let max_size = 20;
         for i in 0..(max_size + 10) as u64 {
             let version = DataVersion { timestamp: i };
@@ -168,7 +183,7 @@ mod fixed_size_buffer_tests {
     }
 
     fn test_buffer_contains_key_returns_expected<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(2);
+        let mut buffer = T::new(2, false);
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
@@ -179,7 +194,7 @@ mod fixed_size_buffer_tests {
     }
 
     fn test_buffer_get_returns_expected_data<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(2);
+        let mut buffer = T::new(2, false);
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());

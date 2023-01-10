@@ -37,7 +37,7 @@ impl<T: FixedSizeBuffer> BoundedBufferedData<T> {
     fn get_or_create_channel(&mut self, channel: &ChannelID) -> &mut T {
         self.data
             .entry(channel.clone())
-            .or_insert(T::new(self.max_size))
+            .or_insert(T::new(self.max_size, false))
     }
 }
 
@@ -56,7 +56,7 @@ impl<T: FixedSizeBuffer> DataBuffer for BoundedBufferedData<T> {
 
         let buffer = self.get_channel(channel)?;
         let data_version = (channel.clone(), packet.version.clone());
-        buffer.insert(packet.version.clone(), packet);
+        buffer.insert(packet.version.clone(), packet)?;
         Ok(data_version)
     }
 

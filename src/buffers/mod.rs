@@ -17,6 +17,8 @@ pub enum BufferError {
     DuplicateChannelError(ChannelID),
     #[error("Problem while processing data: {0:?}.")]
     InternalError(String),
+    #[error("Buffer is full")]
+    BufferFull,
 }
 
 pub trait DataBuffer {
