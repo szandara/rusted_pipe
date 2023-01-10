@@ -25,8 +25,8 @@ use indexmap::IndexMap;
 
 type ProcessorSafe = Arc<Mutex<dyn Processor>>;
 
-fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue) -> Node {
-    Node::new(Arc::new(Mutex::new(processor)), work_queue)
+fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue, is_source: bool) -> Node {
+    Node::default(Arc::new(Mutex::new(processor)), work_queue, is_source)
 }
 
 pub struct Graph {
@@ -124,7 +124,7 @@ impl Graph {
         }));
     }
 
-    fn stop(&mut self) {
+    pub fn stop(&mut self) {
         self.running.swap(false, Ordering::Relaxed);
         for n in 0..self.node_threads.len() {
             self.node_threads.remove(n).join().unwrap();
@@ -201,7 +201,7 @@ fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
 
     while running.load(Ordering::Relaxed) {
         let channel_index = selector.ready();
-        let _read_version = read_channel.try_read_index(channel_index);
+        read_channel.try_read_index(channel_index).unwrap();
     }
     read_channel.stop();
 }
@@ -224,12 +224,29 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    fn new(handler: ProcessorSafe, work_queue: WorkQueue) -> Self {
+    pub fn default(handler: ProcessorSafe, work_queue: WorkQueue, is_source: bool) -> Self {
         Node {
             id: handler.lock().unwrap().id().clone(),
-            is_source: true,
+            is_source,
             write_channel: WriteChannel::default(),
             read_channel: ReadChannel::default(),
+            handler: handler.clone(),
+            work_queue,
+        }
+    }
+
+    pub fn new(
+        handler: ProcessorSafe,
+        work_queue: WorkQueue,
+        is_source: bool,
+        read_channel: ReadChannel,
+        write_channel: WriteChannel,
+    ) -> Self {
+        Node {
+            id: handler.lock().unwrap().id().clone(),
+            is_source,
+            write_channel,
+            read_channel,
             handler: handler.clone(),
             work_queue,
         }
@@ -281,7 +298,6 @@ mod tests {
     struct TestNodeProducer {
         id: String,
         produce_time_ms: u64,
-        max_packets: usize,
         counter: usize,
     }
 
@@ -290,7 +306,6 @@ mod tests {
             TestNodeProducer {
                 id,
                 produce_time_ms,
-                max_packets,
                 counter: 0,
             }
         }
@@ -382,12 +397,12 @@ mod tests {
         consume_time_ms: u64,
         consumer_queue_strategy: WorkQueue,
     ) -> (Graph, Receiver<PacketSet>) {
-        let node0 = new_node(node0, WorkQueue::default());
-        let node1 = new_node(node1, WorkQueue::default());
+        let node0 = new_node(node0, WorkQueue::default(), true);
+        let node1 = new_node(node1, WorkQueue::default(), true);
 
         let (output, output_check) = unbounded();
         let process_terminal = TestNodeConsumer::new(output.clone(), consume_time_ms);
-        let process_terminal = new_node(process_terminal, consumer_queue_strategy);
+        let process_terminal = new_node(process_terminal, consumer_queue_strategy, false);
 
         let mut graph = Graph::new();
 
@@ -417,10 +432,14 @@ mod tests {
 
     fn check_results(results: &Vec<PacketSet>, max_packets: usize) {
         assert_eq!(results.len(), max_packets);
-        for result in results {
+        for (i, result) in results.iter().enumerate() {
             assert_eq!(result.channels(), 2);
-            assert_eq!(*result.get::<String>(0).unwrap().data, "Test".to_string());
-            assert_eq!(*result.get::<String>(1).unwrap().data, "Test".to_string());
+            let data_0 = result.get::<String>(0);
+            let data_1 = result.get::<String>(1);
+            assert!(data_0.is_ok(), "At packet {}", i);
+            assert!(data_1.is_ok(), "At packet {}", i);
+            assert_eq!(*data_0.unwrap().data, "Test".to_string(), "At packet {}", i);
+            assert_eq!(*data_1.unwrap().data, "Test".to_string(), "At packet {}", i);
         }
     }
 
@@ -446,7 +465,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_millis(400);
         graph.start();
 
-        for i in 0..max_packets {
+        for _ in 0..max_packets {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
                 break;
@@ -460,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn test_linked_nodes_can_send_and_receive_data_different_produce_speed() {
+    fn test_linked_nodes_can_send_and_receive_at_different_produce_speed() {
         let max_packets = 10;
         let mock_processing_time_ms = 3;
         let collection_time_ms: u64 = 400;

@@ -1,11 +1,12 @@
 use super::ChannelError;
 use super::UntypedReceiverChannel;
 
+use crate::buffers::single_buffers::FixedSizeBTree;
 use crate::packet::ChannelID;
 
 use crate::packet::UntypedPacket;
 
-use crate::buffers::btree_data_buffers::BtreeBufferedData;
+use crate::buffers::channel_buffers::BoundedBufferedData;
 use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::synchronizers::TimestampSynchronizer;
 
@@ -19,6 +20,7 @@ use crate::packet::ReadEvent;
 use crate::packet::WorkQueue;
 use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::mem::MaybeUninit;
 use std::sync::{Arc, Mutex};
 
 unsafe impl Send for ReadChannel {}
@@ -28,6 +30,7 @@ pub struct ReadChannel {
     synch_strategy: Box<dyn PacketSynchronizer>,
     channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
     channel_index: HashMap<ChannelID, usize>,
+    work_queue: Option<Arc<WorkQueue>>,
 }
 
 unsafe impl Send for ReadEvent {}
@@ -36,10 +39,13 @@ const MAX_BUFFER_PER_CHANNEL: usize = 1000;
 impl ReadChannel {
     pub fn default() -> Self {
         ReadChannel {
-            buffered_data: Arc::new(Mutex::new(BtreeBufferedData::new(MAX_BUFFER_PER_CHANNEL))),
+            buffered_data: Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
+                MAX_BUFFER_PER_CHANNEL,
+            ))),
             synch_strategy: Box::new(TimestampSynchronizer::default()),
             channels: Default::default(),
             channel_index: Default::default(),
+            work_queue: None,
         }
     }
 
@@ -52,6 +58,7 @@ impl ReadChannel {
             synch_strategy,
             channels: Default::default(),
             channel_index: Default::default(),
+            work_queue: None,
         }
     }
 
@@ -82,13 +89,22 @@ impl ReadChannel {
         packet: UntypedPacket,
         channel: ChannelID,
     ) -> Result<PacketBufferAddress, ChannelError> {
+        let channels = self.available_channels().iter().cloned().collect();
         let packet_address = self
             .buffered_data
             .lock()
             .unwrap()
             .insert(&channel, packet)?;
-        self.synch_strategy.packet_event(packet_address.clone());
-        Ok(packet_address)
+
+        if let Some(maybe_work_queue) = &self.work_queue {
+            self.synch_strategy.synchronize(
+                &mut self.buffered_data,
+                &channels,
+                maybe_work_queue.clone(),
+            );
+            return Ok(packet_address);
+        }
+        return Err(ChannelError::NotInitializedError);
     }
 
     pub fn try_read_index(
@@ -126,27 +142,31 @@ impl ReadChannel {
             .collect_vec()
     }
 
-    pub fn start(&mut self, node_id: usize, work_queue: Arc<WorkQueue>) -> () {
-        self.synch_strategy.start(
-            self.buffered_data.clone(),
-            work_queue,
-            node_id,
-            &self.available_channels(),
-        )
+    pub fn start(&mut self, _: usize, work_queue: Arc<WorkQueue>) -> () {
+        self.work_queue = Some(work_queue);
+        // self.synch_strategy.start(
+        //     self.buffered_data.clone(),
+        //     work_queue,
+        //     node_id,
+        //     &self.available_channels(),
+        // )
     }
 
     pub fn stop(&mut self) -> () {
-        self.synch_strategy.stop()
+        //self.synch_strategy.stop()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::channels::untyped_channel;
     use crate::channels::ChannelID;
     use crate::channels::ReadChannel;
     use crate::channels::UntypedSenderChannel;
     use crate::packet::Packet;
+    use crate::packet::WorkQueue;
     use crate::ChannelError;
     use crate::DataVersion;
     use crossbeam::channel::TryRecvError;
@@ -182,18 +202,6 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn test_read_channel_get_packets_packetset_has_all_channels_if_no_version() {
-    //     let mut read_channel = test_read_channel().0;
-    //     let packetset = read_channel.get_packets_for_version(&DataVersion { timestamp: 1 });
-
-    //     assert_eq!(packetset.channels(), 1);
-    //     assert!(packetset
-    //         .get_channel::<String>(&ChannelID::from("test_channel_1"))
-    //         .ok()
-    //         .is_none());
-    // }
-
     #[test]
     fn test_read_channel_try_read_returns_error_if_no_data() {
         let (mut read_channel, _) = test_read_channel();
@@ -214,6 +222,7 @@ mod tests {
                 DataVersion { timestamp: 1 },
             ))
             .unwrap();
+        read_channel.start(0, Arc::new(WorkQueue::default()));
         assert_eq!(
             read_channel
                 .try_read(&ChannelID::from("test_channel_1"))
@@ -235,5 +244,13 @@ mod tests {
                 .unwrap(),
             ChannelError::MissingChannel(ChannelID::from("test_fake"))
         );
+    }
+
+    #[test]
+    fn test_read_channel_try_read_returns_error_when_push_if_not_initialized() {
+        let (mut read_channel, _) = test_read_channel();
+        assert!(read_channel
+            .try_read(&ChannelID::from("test_channel_1"))
+            .is_err());
     }
 }

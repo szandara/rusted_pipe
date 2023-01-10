@@ -1,35 +1,30 @@
-use super::single_buffers::FixedSizeBuffer;
 use super::BufferError;
 use super::DataBuffer;
 use super::OrderedBuffer;
-use crate::buffers::single_buffers::RingBuffer;
+use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
 
+use itertools::Itertools;
+
 use super::PacketBufferAddress;
 use std::collections::HashMap;
 
-pub struct CircularBufferedData {
-    data: HashMap<ChannelID, RingBuffer>,
+pub struct BoundedBufferedData<T: FixedSizeBuffer> {
+    data: HashMap<ChannelID, T>,
     max_size: usize,
-    remove_before_consumed: bool,
 }
 
-fn create_buffer(max_size: usize) -> RingBuffer {
-    RingBuffer::new(max_size)
-}
-
-impl CircularBufferedData {
-    pub fn new(max_size: usize, remove_before_consumed: bool) -> Self {
-        CircularBufferedData {
-            data: Default::default(),
+impl<T: FixedSizeBuffer> BoundedBufferedData<T> {
+    pub fn new(max_size: usize) -> Self {
+        BoundedBufferedData {
+            data: HashMap::<ChannelID, T>::default(),
             max_size,
-            remove_before_consumed,
         }
     }
 
-    fn get_channel(&mut self, channel: &ChannelID) -> Result<&mut RingBuffer, BufferError> {
+    fn get_channel(&mut self, channel: &ChannelID) -> Result<&mut T, BufferError> {
         Ok(self
             .data
             .get_mut(channel)
@@ -39,14 +34,14 @@ impl CircularBufferedData {
             )))?)
     }
 
-    fn get_or_create_channel(&mut self, channel: &ChannelID) -> &mut RingBuffer {
+    fn get_or_create_channel(&mut self, channel: &ChannelID) -> &mut T {
         self.data
             .entry(channel.clone())
-            .or_insert(create_buffer(self.max_size))
+            .or_insert(T::new(self.max_size))
     }
 }
 
-impl DataBuffer for CircularBufferedData {
+impl<T: FixedSizeBuffer> DataBuffer for BoundedBufferedData<T> {
     fn insert(
         &mut self,
         channel: &ChannelID,
@@ -61,7 +56,7 @@ impl DataBuffer for CircularBufferedData {
 
         let buffer = self.get_channel(channel)?;
         let data_version = (channel.clone(), packet.version.clone());
-        buffer.insert(packet.version, packet);
+        buffer.insert(packet.version.clone(), packet);
         Ok(data_version)
     }
 
@@ -69,11 +64,7 @@ impl DataBuffer for CircularBufferedData {
         &mut self,
         version: &PacketBufferAddress,
     ) -> Result<Option<UntypedPacket>, BufferError> {
-        if self.remove_before_consumed {
-            self.get_channel(&version.0)?.cleanup_before(&version.1);
-        }
         let data = self.get_channel(&version.0)?.remove(&version.1);
-
         Ok(data)
     }
 
@@ -85,7 +76,11 @@ impl DataBuffer for CircularBufferedData {
     }
 
     fn available_channels(&self) -> Vec<ChannelID> {
-        self.data.keys().cloned().collect()
+        self.data
+            .keys()
+            .into_iter()
+            .map(|key| key.clone())
+            .collect_vec()
     }
 
     fn create_channel(&mut self, channel: &ChannelID) -> Result<ChannelID, BufferError> {
@@ -97,22 +92,64 @@ impl DataBuffer for CircularBufferedData {
     }
 }
 
-impl OrderedBuffer for CircularBufferedData {
+impl<T: FixedSizeBuffer> OrderedBuffer for BoundedBufferedData<T> {
     fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool {
-        self.data.contains_key(channel) && self.data.get(channel).unwrap().contains_key(version)
+        match self.data.get(channel) {
+            Some(channel) => channel.contains_key(version),
+            _ => false,
+        }
+    }
+
+    fn peek(&self, channel: &ChannelID) -> Option<&DataVersion> {
+        match self.data.get(channel) {
+            Some(channel) => channel.peek(),
+            _ => None,
+        }
+    }
+
+    fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError> {
+        match self.peek(channel) {
+            Some(min_version) => {
+                return Ok(self.consume(&(channel.clone(), min_version.clone()))?);
+            }
+            None => return Ok(None),
+        }
     }
 }
 
 #[cfg(test)]
-mod circular_buffer_data_tests {
+mod btree_buffer_tests {
     use super::*;
+    use crate::buffers::single_buffers::{FixedSizeBTree, RtRingBuffer};
     use crate::channels::Packet;
     use crate::packet::UntypedPacketCast;
 
-    #[test]
-    fn test_buffer_errors_if_inserts_on_missing_channel() {
+    macro_rules! param_test {
+        ($($type:ident)*) => {
+        $(
+            paste::item! {
+                #[test]
+                fn [< test_buffer_errors_if_inserts_on_missing_channel _ $type >] () {
+                    test_buffer_errors_if_inserts_on_missing_channel::<$type>();
+                }
+
+                #[test]
+                fn [< test_buffer_throws_if_same_channel_created _ $type >] () {
+                    test_buffer_throws_if_same_channel_created::<$type>();
+                }
+
+                #[test]
+                fn [< test_buffer_inserts_returns_data_and_gets_retained _ $type >] () {
+                    test_buffer_inserts_returns_data_and_gets_retained::<$type>();
+                }
+            }
+        )*
+        }
+    }
+
+    fn test_buffer_errors_if_inserts_on_missing_channel<T: FixedSizeBuffer>() {
         let max_size = 20;
-        let mut buffer = CircularBufferedData::new(max_size, false);
+        let mut buffer = BoundedBufferedData::<T>::new(max_size);
 
         let channel_0 = ChannelID {
             id: "ch0".to_string(),
@@ -127,10 +164,9 @@ mod circular_buffer_data_tests {
         assert!(buffer.insert(&channel_0, packet.to_untyped()).is_err())
     }
 
-    #[test]
-    fn test_buffer_throws_if_same_channel_created() {
+    fn test_buffer_throws_if_same_channel_created<T: FixedSizeBuffer>() {
         let max_size = 20;
-        let mut buffer = CircularBufferedData::new(max_size, false);
+        let mut buffer = BoundedBufferedData::<T>::new(max_size);
 
         let channel_0 = ChannelID {
             id: "ch0".to_string(),
@@ -139,10 +175,9 @@ mod circular_buffer_data_tests {
         assert!(buffer.create_channel(&channel_0).is_err());
     }
 
-    #[test]
-    fn test_buffer_inserts_returns_data_and_gets_retained() {
+    fn test_buffer_inserts_returns_data_and_gets_retained<T: FixedSizeBuffer>() {
         let max_size = 20;
-        let mut buffer = CircularBufferedData::new(max_size, false);
+        let mut buffer = BoundedBufferedData::<T>::new(max_size);
 
         let channel_0 = ChannelID {
             id: "ch0".to_string(),
@@ -171,43 +206,6 @@ mod circular_buffer_data_tests {
             .is_none())
     }
 
-    #[test]
-    fn test_buffer_insert_random_order_then_removes_old_data_once_consumed() {
-        let max_size = 100;
-        let mut buffer = CircularBufferedData::new(max_size, true);
-
-        let channel_0 = ChannelID {
-            id: "ch0".to_string(),
-        };
-        let channel_1 = ChannelID {
-            id: "ch1".to_string(),
-        };
-        buffer.create_channel(&channel_0).unwrap();
-        buffer.create_channel(&channel_1).unwrap();
-
-        let vals: Vec<u64> = (0..100).collect();
-
-        for i in vals {
-            let version = DataVersion { timestamp: i };
-            let packet = Packet::<String>::new("test_0".to_string(), version.clone());
-            buffer.insert(&channel_0, packet.to_untyped()).unwrap();
-            let packet = Packet::<String>::new("test_1".to_string(), version.clone());
-            buffer.insert(&channel_1, packet.to_untyped()).unwrap();
-        }
-        let version = DataVersion { timestamp: 10 };
-        let address = (channel_0.clone(), version.clone());
-        let _ = buffer.consume(&address).unwrap().unwrap();
-
-        for old_version in 0..9 {
-            let version = DataVersion {
-                timestamp: old_version,
-            };
-            let address = (channel_0.clone(), version.clone());
-            assert!(
-                buffer.get(&address).unwrap().is_none(),
-                "Found {}",
-                old_version
-            )
-        }
-    }
+    param_test!(FixedSizeBTree);
+    param_test!(RtRingBuffer);
 }

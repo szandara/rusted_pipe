@@ -161,7 +161,6 @@ impl PacketSet {
 unsafe impl Send for PacketSet {}
 
 pub struct ReadEvent {
-    pub processor_index: usize,
     pub packet_data: PacketSet,
 }
 
@@ -185,14 +184,13 @@ impl WorkQueue {
         }
     }
 
-    pub fn push(&self, node_id: usize, packet_set: PacketSet) {
+    pub fn push(&self, packet_set: PacketSet) {
         self.queue.push(ReadEvent {
-            processor_index: node_id,
             packet_data: packet_set,
         });
-
         while self.queue.len() > self.max_in_queue {
             self.queue.steal().is_success();
+            println!("WQ Dropped");
         }
     }
 

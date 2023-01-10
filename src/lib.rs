@@ -23,4 +23,6 @@ pub enum RustedPipeError {
     MissingNodeError(String),
     #[error("Error while executing processor: {0:?}")]
     ProcessorError(String),
+    #[error("No more packets to send")]
+    EndOfStream(),
 }

@@ -31,6 +31,8 @@ pub enum ChannelError {
     EndOfStreamError(ChannelID),
     #[error("Error in the buffer operation.")]
     ErrorInBuffer(#[from] BufferError),
+    #[error("Channel was not initialized.")]
+    NotInitializedError,
 }
 
 pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {

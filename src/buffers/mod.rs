@@ -1,5 +1,4 @@
-pub mod btree_data_buffers;
-pub mod circular_data_buffers;
+pub mod channel_buffers;
 pub mod single_buffers;
 pub mod synchronizers;
 use crate::packet::ChannelID;
@@ -20,7 +19,7 @@ pub enum BufferError {
     InternalError(String),
 }
 
-pub trait DataBuffer: Sync + Send {
+pub trait DataBuffer {
     fn insert(
         &mut self,
         channel: &ChannelID,
@@ -42,4 +41,8 @@ pub trait DataBuffer: Sync + Send {
 
 pub trait OrderedBuffer: DataBuffer {
     fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
+
+    fn peek(&self, channel: &ChannelID) -> Option<&DataVersion>;
+
+    fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError>;
 }
