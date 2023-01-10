@@ -1,8 +1,3 @@
-use crossbeam::channel::unbounded;
-use crossbeam::channel::Receiver;
-use crossbeam::channel::RecvTimeoutError;
-use crossbeam::channel::Sender;
-
 use super::OrderedBuffer;
 use super::PacketBufferAddress;
 use crate::packet::ChannelID;
@@ -10,22 +5,8 @@ use crate::packet::ChannelID;
 use crate::packet::PacketSet;
 use crate::packet::WorkQueue;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::thread::JoinHandle;
-use std::time::Duration;
 
 pub trait PacketSynchronizer: Send {
-    // fn start(
-    //     &mut self,
-    //     buffer: Arc<Mutex<dyn OrderedBuffer>>,
-    //     work_queue: Arc<WorkQueue>,
-    //     node_id: usize,
-    //     available_channels: &Vec<ChannelID>,
-    // ) -> ();
-
-    // fn packet_event(&self, packet_address: PacketBufferAddress);
-
-    // fn stop(&mut self) -> ();
     fn synchronize(
         &self,
         ordered_buffer: &Arc<Mutex<dyn OrderedBuffer>>,
@@ -34,24 +15,8 @@ pub trait PacketSynchronizer: Send {
     );
 }
 
-#[derive(Debug)]
-pub struct TimestampSynchronizer {
-    thread_handler: Option<JoinHandle<()>>,
-    send_event: Sender<Option<PacketBufferAddress>>,
-    receive_event: Receiver<Option<PacketBufferAddress>>,
-}
-
-impl TimestampSynchronizer {
-    pub fn default() -> Self {
-        let (send_event, receive_event) = unbounded::<Option<PacketBufferAddress>>();
-
-        TimestampSynchronizer {
-            thread_handler: None,
-            send_event,
-            receive_event,
-        }
-    }
-}
+#[derive(Debug, Default)]
+pub struct TimestampSynchronizer {}
 
 fn synchronize(
     ordered_buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
@@ -74,6 +39,7 @@ fn synchronize(
         }
     }
     if min_version.is_some() {
+        //("Synced {:?}", min_version);
         return Some(
             available_channels
                 .iter()
@@ -94,7 +60,6 @@ fn get_packets_for_version(
         .iter()
         .map(|(channel_id, data_version)| {
             let removed_packet = buffer_locked.pop(channel_id);
-            println!("Adding {:?}", removed_packet);
             if removed_packet.is_err() {
                 eprintln!(
                     "Error while reading data {}",
@@ -142,61 +107,16 @@ impl PacketSynchronizer for TimestampSynchronizer {
                 if let Some(packet_set) =
                     get_packets_for_version(&data_versions, &mut ordered_buffer.clone())
                 {
+                    //println!("Sending {:?}", data_versions);
                     work_queue.push(packet_set)
+                } else {
+                    break;
                 }
             } else {
                 break;
             }
         }
     }
-    // fn start(
-    //     &mut self,
-    //     buffer: Arc<Mutex<dyn OrderedBuffer>>,
-    //     work_queue: Arc<WorkQueue>,
-    //     node_id: usize,
-    //     available_channels: &Vec<ChannelID>,
-    // ) -> () {
-    //     let mut buffer_thread = buffer.clone();
-    //     let available_channels = available_channels.clone();
-
-    //     let receive_thread = self.receive_event.clone();
-    //     let handler = thread::spawn(move || loop {
-    //         let result = receive_thread.recv_timeout(Duration::from_millis(100));
-    //         if let Err(RecvTimeoutError::Timeout) = result {
-    //             continue;
-    //         }
-
-    //         let data = result.unwrap();
-    //         if data.is_none() {
-    //             return ();
-    //         }
-
-    //         loop {
-    //             if let Some(data_versions) = synchronize(&mut buffer_thread, &available_channels) {
-    //                 if let Some(packet_set) =
-    //                     get_packets_for_version(&data_versions, &mut buffer_thread)
-    //                 {
-    //                     work_queue.push(node_id, packet_set)
-    //                 }
-    //             } else {
-    //                 break;
-    //             }
-    //         }
-    //     });
-    //     self.thread_handler = Some(handler);
-    // }
-
-    // fn stop(&mut self) -> () {
-    //     self.send_event.send(None).unwrap();
-    //     if self.thread_handler.is_some() {
-    //         self.thread_handler.take().unwrap().join().unwrap();
-    //     }
-    //     ()
-    // }
-
-    // fn packet_event(&self, packet_address: PacketBufferAddress) {
-    //     self.send_event.send(Some(packet_address)).unwrap();
-    // }
 }
 
 #[cfg(test)]
@@ -300,20 +220,6 @@ mod tests {
             .unwrap()
             .insert(&ChannelID::new(channel_id), packet.clone().to_untyped())
             .unwrap();
-    }
-
-    fn check_packet(packet_set: PacketSet, expected_timestamp: u64) {
-        for i in 0..2 {
-            assert_eq!(
-                packet_set.get::<String>(i).unwrap().version.timestamp,
-                expected_timestamp
-            );
-        }
-    }
-
-    fn check_data(work_queue: &Arc<WorkQueue>, expected_timestamp: u64) {
-        let work = work_queue.steal().success().unwrap();
-        check_packet(work.packet_data, expected_timestamp);
     }
 
     #[test]

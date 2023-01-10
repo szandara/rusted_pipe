@@ -1,8 +1,8 @@
 use crate::channels::UntypedPacket;
 use crate::DataVersion;
-use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferWrite};
+use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, RingBufferWrite};
 
-type _RingBuffer = AllocRingBuffer<Option<UntypedPacket>>;
+type _RingBuffer = AllocRingBuffer<UntypedPacket>;
 
 pub trait FixedSizeBuffer {
     fn new(max_size: usize) -> Self;
@@ -11,13 +11,13 @@ pub trait FixedSizeBuffer {
 
     fn get(&self, version: &DataVersion) -> Option<&UntypedPacket>;
 
-    fn remove(&mut self, version: &DataVersion) -> Option<UntypedPacket>;
-
     fn insert(&mut self, version: DataVersion, packet: UntypedPacket);
 
     fn len(&self) -> usize;
 
     fn peek(&self) -> Option<&DataVersion>;
+
+    fn pop(&mut self) -> Option<UntypedPacket>;
 }
 
 pub struct RtRingBuffer {
@@ -26,33 +26,14 @@ pub struct RtRingBuffer {
 
 impl RtRingBuffer {
     pub fn find_version(&self, version: &DataVersion) -> Option<&UntypedPacket> {
-        if let Some(maybe_found) = self.buffer.iter().find(|packet| {
-            packet
-                .as_ref()
-                .is_some_and(|packet| packet.version == *version)
-        }) {
-            return maybe_found.as_ref();
-        }
-        None
+        self.buffer.iter().find(|packet| packet.version == *version)
     }
-
-    // pub fn take_version(&mut self, version: &DataVersion) -> Option<UntypedPacket> {
-    //     if let Some(maybe_found) = self.consumer.iter_mut().find(|packet| {
-    //         packet
-    //             .as_ref()
-    //             .is_some_and(|packet| packet.version == *version)
-    //     }) {
-    //         return maybe_found.take();
-    //     }
-    //     None
-    // }
 }
 
 impl FixedSizeBuffer for RtRingBuffer {
     fn new(mut max_size: usize) -> Self {
         if !max_size.is_power_of_two() {
-            println!("Pre {}", max_size);
-            max_size = (2 as usize).pow(max_size.ilog2() / (2 as usize).ilog2());
+            max_size = (2 as usize).pow(max_size.ilog2() / (2 as usize).ilog2() + 1);
         }
         return RtRingBuffer {
             buffer: _RingBuffer::with_capacity(max_size),
@@ -67,26 +48,23 @@ impl FixedSizeBuffer for RtRingBuffer {
         self.find_version(version)
     }
 
-    fn remove(&mut self, version: &DataVersion) -> Option<UntypedPacket> {
-        //self.take_version(version)
-        None
-    }
-
     fn insert(&mut self, _version: DataVersion, packet: UntypedPacket) {
-        self.buffer.push(Some(packet));
+        self.buffer.push(packet);
     }
 
     fn len(&self) -> usize {
-        0
+        self.buffer.len()
     }
 
     fn peek(&self) -> Option<&DataVersion> {
         if let Some(peek) = self.buffer.peek() {
-            if let Some(data) = peek.as_ref() {
-                return Some(&data.version);
-            }
+            return Some(&peek.version);
         }
         None
+    }
+
+    fn pop(&mut self) -> Option<UntypedPacket> {
+        self.buffer.dequeue()
     }
 }
 
@@ -121,18 +99,10 @@ impl FixedSizeBuffer for FixedSizeBTree {
         self.data.get(version)
     }
 
-    fn remove(&mut self, version: &DataVersion) -> Option<UntypedPacket> {
-        println!("Removing {:?}", version);
-        self.data.remove(version)
-    }
-
     fn insert(&mut self, version: DataVersion, packet: UntypedPacket) {
-        println!("Inserting {:?}", version);
         self.data.insert(version, packet);
         while self.data.len() > self.max_size {
-            let last_entry = self.data.first_entry().unwrap().key().clone();
-            self.data.remove(&last_entry);
-            println!("BTree Dropped");
+            self.data.pop_first();
         }
     }
 
@@ -145,6 +115,13 @@ impl FixedSizeBuffer for FixedSizeBTree {
             Some(data) => Some(data.0),
             None => None,
         }
+    }
+
+    fn pop(&mut self) -> Option<UntypedPacket> {
+        if let Some(value) = self.data.pop_first() {
+            return Some(value.1);
+        }
+        None
     }
 }
 
@@ -170,10 +147,6 @@ mod fixed_size_buffer_tests {
                 #[test]
                 fn [< test_buffer_get_returns_expected_data _ $type >] () {
                     test_buffer_get_returns_expected_data::<$type>();
-                }
-                #[test]
-                fn [< test_buffer_get_consumes_data_and_removes_from_buffer _ $type >] () {
-                    test_buffer_get_consumes_data_and_removes_from_buffer::<$type>();
                 }
             }
         )*
@@ -217,18 +190,6 @@ mod fixed_size_buffer_tests {
         }
     }
 
-    fn test_buffer_get_consumes_data_and_removes_from_buffer<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(2);
-        for i in 0..3 {
-            let version = DataVersion { timestamp: i };
-            let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped());
-            let untyped_data = buffer.remove(&DataVersion { timestamp: i }).unwrap();
-            let data = untyped_data.deref::<String>().unwrap();
-            assert_eq!(*data.data, format!("test {}", i).to_string());
-            assert!(!buffer.contains_key(&version));
-        }
-    }
     param_test!(FixedSizeBTree);
     //param_test!(RtRingBuffer);
 }

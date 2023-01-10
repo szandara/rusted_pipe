@@ -9,7 +9,8 @@ use std::{
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use rusted_pipe::{
     buffers::{
-        channel_buffers::BoundedBufferedData, single_buffers::FixedSizeBTree,
+        channel_buffers::BoundedBufferedData,
+        single_buffers::{FixedSizeBTree, RtRingBuffer},
         synchronizers::TimestampSynchronizer,
     },
     channels::{ReadChannel, WriteChannel},
@@ -21,9 +22,7 @@ use rusted_pipe::{
 fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue, is_source: bool) -> Node {
     let write_channel = WriteChannel::default();
     let read_channel = ReadChannel::new(
-        Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
-            20000,
-        ))),
+        Arc::new(Mutex::new(BoundedBufferedData::<RtRingBuffer>::new(200000))),
         Box::new(TimestampSynchronizer::default()),
     );
     Node::new(
@@ -156,12 +155,12 @@ fn setup_default_test(
 }
 
 fn main() {
-    let max_packets = 50;
+    let max_packets = 100000;
     let mock_processing_time_ms = 0;
 
     let node0 = TestNodeProducer::new(
         "producer1".to_string(),
-        mock_processing_time_ms * 1,
+        mock_processing_time_ms,
         max_packets,
     );
     let node1 = TestNodeProducer::new(
@@ -177,9 +176,12 @@ fn main() {
 
     let start = Instant::now();
     loop {
-        if let Err(_) = receiver.recv_timeout(Duration::from_millis(500)) {
+        let data = receiver.recv_timeout(Duration::from_millis(500));
+        if let Err(_) = data {
             eprintln!("Passed deadline");
             break;
+        } else {
+            //println!("Read {:?}", data.unwrap().get::<String>(0).unwrap().version)
         }
         packets += 1;
         if packets >= max_packets {

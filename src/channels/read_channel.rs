@@ -20,7 +20,6 @@ use crate::packet::ReadEvent;
 use crate::packet::WorkQueue;
 use indexmap::IndexMap;
 use std::collections::HashMap;
-use std::mem::MaybeUninit;
 use std::sync::{Arc, Mutex};
 
 unsafe impl Send for ReadChannel {}
@@ -144,17 +143,9 @@ impl ReadChannel {
 
     pub fn start(&mut self, _: usize, work_queue: Arc<WorkQueue>) -> () {
         self.work_queue = Some(work_queue);
-        // self.synch_strategy.start(
-        //     self.buffered_data.clone(),
-        //     work_queue,
-        //     node_id,
-        //     &self.available_channels(),
-        // )
     }
 
-    pub fn stop(&mut self) -> () {
-        //self.synch_strategy.stop()
-    }
+    pub fn stop(&mut self) -> () {}
 }
 
 #[cfg(test)]

@@ -1,5 +1,4 @@
 use std::any::{Any, TypeId};
-use std::default;
 use std::marker::Copy;
 
 use crossbeam::deque::{Injector, Steal};
@@ -190,7 +189,6 @@ impl WorkQueue {
         });
         while self.queue.len() > self.max_in_queue {
             self.queue.steal().is_success();
-            println!("WQ Dropped");
         }
     }
 

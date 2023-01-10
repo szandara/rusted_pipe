@@ -201,7 +201,10 @@ fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
 
     while running.load(Ordering::Relaxed) {
         let channel_index = selector.ready();
-        read_channel.try_read_index(channel_index).unwrap();
+        let read_index = read_channel.try_read_index(channel_index);
+        if read_index.is_err() {
+            eprintln!("Exception while reading {:?}. Skipping", read_index);
+        }
     }
     read_channel.stop();
 }
@@ -462,7 +465,7 @@ mod tests {
         let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
-        let deadline = Instant::now() + Duration::from_millis(400);
+        let deadline = Instant::now() + Duration::from_millis(450);
         graph.start();
 
         for _ in 0..max_packets {

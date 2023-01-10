@@ -60,14 +60,6 @@ impl<T: FixedSizeBuffer> DataBuffer for BoundedBufferedData<T> {
         Ok(data_version)
     }
 
-    fn consume(
-        &mut self,
-        version: &PacketBufferAddress,
-    ) -> Result<Option<UntypedPacket>, BufferError> {
-        let data = self.get_channel(&version.0)?.remove(&version.1);
-        Ok(data)
-    }
-
     fn get(
         &mut self,
         version: &PacketBufferAddress,
@@ -108,12 +100,8 @@ impl<T: FixedSizeBuffer> OrderedBuffer for BoundedBufferedData<T> {
     }
 
     fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError> {
-        match self.peek(channel) {
-            Some(min_version) => {
-                return Ok(self.consume(&(channel.clone(), min_version.clone()))?);
-            }
-            None => return Ok(None),
-        }
+        let channel = (self.get_channel(channel))?;
+        return Ok(channel.pop());
     }
 }
 

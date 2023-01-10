@@ -26,11 +26,6 @@ pub trait DataBuffer {
         packet: UntypedPacket,
     ) -> Result<PacketBufferAddress, BufferError>;
 
-    fn consume(
-        &mut self,
-        version: &PacketBufferAddress,
-    ) -> Result<Option<UntypedPacket>, BufferError>;
-
     fn get(&mut self, version: &PacketBufferAddress)
         -> Result<Option<&UntypedPacket>, BufferError>;
 
