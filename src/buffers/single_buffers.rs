@@ -51,7 +51,7 @@ impl FixedSizeBuffer for RtRingBuffer {
     }
 
     fn insert(&mut self, _version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError> {
-        if self.buffer.capacity() <= 0 {
+        if self.block_full && self.buffer.is_full() {
             return Err(BufferError::BufferFull);
         }
         self.buffer.push(packet);
@@ -111,13 +111,13 @@ impl FixedSizeBuffer for FixedSizeBTree {
     }
 
     fn insert(&mut self, version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError> {
-        self.data.insert(version, packet);
-        if self.block_full {
-            return Err(BufferError::BufferFull);
-        }
-        while self.data.len() > self.max_size {
+        while self.data.len() >= self.max_size {
+            if self.block_full {
+                return Err(BufferError::BufferFull);
+            }
             self.data.pop_first();
         }
+        self.data.insert(version, packet);
         Ok(())
     }
 
@@ -145,7 +145,6 @@ mod fixed_size_buffer_tests {
     use super::*;
     use crate::channels::Packet;
     use crate::packet::UntypedPacketCast;
-    use std::cmp;
 
     macro_rules! param_test {
         ($($type:ident)*) => {
@@ -163,22 +162,28 @@ mod fixed_size_buffer_tests {
                 fn [< test_buffer_get_returns_expected_data _ $type >] () {
                     test_buffer_get_returns_expected_data::<$type>();
                 }
+                #[test]
+                fn [< test_buffer_insert_returns_errr_if_full_and_block _ $type >] () {
+                    test_buffer_insert_returns_errr_if_full_and_block::<$type>();
+                }
             }
         )*
         }
     }
 
     fn test_buffer_inserts_and_drops_data_if_past_capacity<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(20, false);
-        let max_size = 20;
+        let max_size = 32;
+        let mut buffer = T::new(max_size, false);
         for i in 0..(max_size + 10) as u64 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped());
-            assert_eq!(
-                buffer.len(),
-                cmp::min(max_size, usize::try_from(i + 1).unwrap())
-            );
+            buffer.insert(version, packet.to_untyped()).unwrap();
+            println!("{}", i);
+            if i >= max_size as u64 {
+                assert_eq!(buffer.peek().unwrap().timestamp, (i - max_size as u64) + 1);
+            } else {
+                assert_eq!(buffer.peek().unwrap().timestamp, 0);
+            }
         }
     }
 
@@ -187,7 +192,7 @@ mod fixed_size_buffer_tests {
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped());
+            buffer.insert(version, packet.to_untyped()).unwrap();
             assert!(buffer.contains_key(&DataVersion { timestamp: i }));
         }
         assert!(!buffer.contains_key(&DataVersion { timestamp: 0 }));
@@ -198,13 +203,29 @@ mod fixed_size_buffer_tests {
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped());
+            buffer.insert(version, packet.to_untyped()).unwrap();
             let untyped_data = buffer.get(&DataVersion { timestamp: i }).unwrap();
             let data = untyped_data.deref::<String>().unwrap();
             assert_eq!(*data.data, format!("test {}", i).to_string());
         }
     }
 
+    fn test_buffer_insert_returns_errr_if_full_and_block<T: FixedSizeBuffer>() {
+        let mut buffer = T::new(2, true);
+        for i in 0..3 {
+            let version = DataVersion { timestamp: i };
+            let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
+            if i == 2 {
+                assert_eq!(
+                    buffer.insert(version, packet.to_untyped()).unwrap_err(),
+                    BufferError::BufferFull
+                );
+            } else {
+                buffer.insert(version, packet.to_untyped()).unwrap();
+            }
+        }
+    }
+
     param_test!(FixedSizeBTree);
-    //param_test!(RtRingBuffer);
+    param_test!(RtRingBuffer);
 }

@@ -21,11 +21,11 @@ pub trait GraphFormatter {
 struct DotFormatter {}
 
 impl GraphFormatter for DotFormatter {
-    fn to_file(self, graph: &Graph, output_file: String) -> Result<(), FormatterError> {
+    fn to_file(self, _: &Graph, _: String) -> Result<(), FormatterError> {
         panic!("Not implemented");
     }
     fn from_file(self, input_file: &str) -> Result<Graph, FormatterError> {
-        let mut graph = Graph::new();
+        let graph = Graph::new();
         let contents = fs::read_to_string(input_file)
             .expect(format!("File not found {}", input_file).as_str());
         let parsed_graph = parse(&contents.as_str())

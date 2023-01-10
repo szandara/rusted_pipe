@@ -22,7 +22,9 @@ use rusted_pipe::{
 fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue, is_source: bool) -> Node {
     let write_channel = WriteChannel::default();
     let read_channel = ReadChannel::new(
-        Arc::new(Mutex::new(BoundedBufferedData::<RtRingBuffer>::new(200000))),
+        Arc::new(Mutex::new(BoundedBufferedData::<RtRingBuffer>::new(
+            200000, true,
+        ))),
         Box::new(TimestampSynchronizer::default()),
     );
     Node::new(

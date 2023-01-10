@@ -40,6 +40,7 @@ impl ReadChannel {
         ReadChannel {
             buffered_data: Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
                 MAX_BUFFER_PER_CHANNEL,
+                false,
             ))),
             synch_strategy: Box::new(TimestampSynchronizer::default()),
             channels: Default::default(),
@@ -151,7 +152,11 @@ impl ReadChannel {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::Mutex;
 
+    use crate::buffers::channel_buffers::BoundedBufferedData;
+    use crate::buffers::single_buffers::FixedSizeBTree;
+    use crate::buffers::synchronizers::TimestampSynchronizer;
     use crate::channels::untyped_channel;
     use crate::channels::ChannelID;
     use crate::channels::ReadChannel;
@@ -242,6 +247,39 @@ mod tests {
         let (mut read_channel, _) = test_read_channel();
         assert!(read_channel
             .try_read(&ChannelID::from("test_channel_1"))
+            .is_err());
+    }
+
+    #[test]
+    fn test_read_channel_try_read_returns_error_when_buffer_is_full() {
+        let buffered_data = Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
+            2, true,
+        )));
+        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let mut read_channel = ReadChannel::new(buffered_data, synch_strategy);
+
+        for i in 0..2 {
+            let crossbeam_channels = untyped_channel();
+            let channel = &ChannelID::from(format!("test{}", i).as_str());
+            read_channel
+                .add_channel(channel, crossbeam_channels.1)
+                .unwrap();
+        }
+
+        let channel = &ChannelID::from("test0");
+        let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp: 1 });
+
+        read_channel.start(100, Arc::new(WorkQueue::default()));
+        read_channel
+            .insert_packet(packet.clone().to_untyped(), channel.clone())
+            .unwrap();
+        packet.version.timestamp = 2;
+        read_channel
+            .insert_packet(packet.clone().to_untyped(), channel.clone())
+            .unwrap();
+        packet.version.timestamp = 3;
+        assert!(read_channel
+            .insert_packet(packet.clone().to_untyped(), channel.clone())
             .is_err());
     }
 }

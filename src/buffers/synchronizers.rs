@@ -129,7 +129,7 @@ mod tests {
     use crate::DataVersion;
 
     fn create_test_buffer() -> BoundedBufferedData<FixedSizeBTree> {
-        let mut buffer = BoundedBufferedData::<FixedSizeBTree>::new(100);
+        let mut buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
 
         buffer
             .create_channel(&ChannelID::new("test1".to_string()))
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn test_read_channel_fails_if_channel_not_added() {
-        let buffer = BoundedBufferedData::<FixedSizeBTree>::new(100);
+        let buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
         let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
 
         let packet = Packet::<String> {

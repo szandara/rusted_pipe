@@ -14,13 +14,15 @@ use std::collections::HashMap;
 pub struct BoundedBufferedData<T: FixedSizeBuffer> {
     data: HashMap<ChannelID, T>,
     max_size: usize,
+    block_full: bool,
 }
 
 impl<T: FixedSizeBuffer> BoundedBufferedData<T> {
-    pub fn new(max_size: usize) -> Self {
+    pub fn new(max_size: usize, block_full: bool) -> Self {
         BoundedBufferedData {
             data: HashMap::<ChannelID, T>::default(),
             max_size,
+            block_full,
         }
     }
 
@@ -37,7 +39,7 @@ impl<T: FixedSizeBuffer> BoundedBufferedData<T> {
     fn get_or_create_channel(&mut self, channel: &ChannelID) -> &mut T {
         self.data
             .entry(channel.clone())
-            .or_insert(T::new(self.max_size, false))
+            .or_insert(T::new(self.max_size, self.block_full))
     }
 }
 
@@ -137,7 +139,7 @@ mod btree_buffer_tests {
 
     fn test_buffer_errors_if_inserts_on_missing_channel<T: FixedSizeBuffer>() {
         let max_size = 20;
-        let mut buffer = BoundedBufferedData::<T>::new(max_size);
+        let mut buffer = BoundedBufferedData::<T>::new(max_size, false);
 
         let channel_0 = ChannelID {
             id: "ch0".to_string(),
@@ -154,7 +156,7 @@ mod btree_buffer_tests {
 
     fn test_buffer_throws_if_same_channel_created<T: FixedSizeBuffer>() {
         let max_size = 20;
-        let mut buffer = BoundedBufferedData::<T>::new(max_size);
+        let mut buffer = BoundedBufferedData::<T>::new(max_size, false);
 
         let channel_0 = ChannelID {
             id: "ch0".to_string(),
@@ -165,7 +167,7 @@ mod btree_buffer_tests {
 
     fn test_buffer_inserts_returns_data_and_gets_retained<T: FixedSizeBuffer>() {
         let max_size = 20;
-        let mut buffer = BoundedBufferedData::<T>::new(max_size);
+        let mut buffer = BoundedBufferedData::<T>::new(max_size, false);
 
         let channel_0 = ChannelID {
             id: "ch0".to_string(),
