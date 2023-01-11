@@ -290,9 +290,13 @@ pub trait Processor: Sync + Send {
 mod tests {
     use super::*;
 
+    use crate::buffers::channel_buffers::BoundedBufferedData;
+    use crate::buffers::single_buffers::FixedSizeBTree;
+    use crate::buffers::synchronizers::TimestampSynchronizer;
     use crate::DataVersion;
     use crossbeam::channel::unbounded;
     use crossbeam::channel::Receiver;
+    use crossbeam::channel::RecvTimeoutError;
     use crossbeam::channel::Sender;
     use std::time::Duration;
     use std::time::Instant;
@@ -394,19 +398,7 @@ mod tests {
         }
     }
 
-    fn setup_default_test(
-        node0: TestNodeProducer,
-        node1: TestNodeProducer,
-        consume_time_ms: u64,
-        consumer_queue_strategy: WorkQueue,
-    ) -> (Graph, Receiver<PacketSet>) {
-        let node0 = new_node(node0, WorkQueue::default(), true);
-        let node1 = new_node(node1, WorkQueue::default(), true);
-
-        let (output, output_check) = unbounded();
-        let process_terminal = TestNodeConsumer::new(output.clone(), consume_time_ms);
-        let process_terminal = new_node(process_terminal, consumer_queue_strategy, false);
-
+    fn setup_test(node0: Node, node1: Node, process_terminal: Node) -> Graph {
         let mut graph = Graph::new();
 
         graph.add_node(node0).unwrap();
@@ -430,7 +422,23 @@ mod tests {
             )
             .unwrap();
 
-        return (graph, output_check);
+        return graph;
+    }
+
+    fn setup_default_test(
+        node0: TestNodeProducer,
+        node1: TestNodeProducer,
+        consume_time_ms: u64,
+        consumer_queue_strategy: WorkQueue,
+    ) -> (Graph, Receiver<PacketSet>) {
+        let node0 = new_node(node0, WorkQueue::default(), true);
+        let node1 = new_node(node1, WorkQueue::default(), true);
+
+        let (output, output_check) = unbounded();
+        let process_terminal = TestNodeConsumer::new(output.clone(), consume_time_ms);
+        let process_terminal = new_node(process_terminal, consumer_queue_strategy, false);
+
+        (setup_test(node0, node1, process_terminal), output_check)
     }
 
     fn check_results(results: &Vec<PacketSet>, max_packets: usize) {
@@ -569,4 +577,71 @@ mod tests {
             );
         }
     }
+
+    fn test_slow_consumers_blocks_if_configured(block_full: bool) {
+        let max_packets = 10;
+        let collection_time_ms: u64 = 50;
+
+        // Very slow producer
+        let node0 = TestNodeProducer::new("producer1".to_string(), 60, max_packets);
+        let node1 = TestNodeProducer::new("producer2".to_string(), 5, max_packets);
+
+        let node0 = new_node(node0, WorkQueue::default(), true);
+        let node1 = new_node(node1, WorkQueue::default(), true);
+
+        let (output, output_check) = unbounded();
+        let process_terminal = TestNodeConsumer::new(output.clone(), 0);
+
+        // Create read buffer with blocking behavior.
+        let buffered_data = Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
+            2, block_full,
+        )));
+        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let read_channel = ReadChannel::new(buffered_data, synch_strategy);
+
+        let process_terminal = Node::new(
+            Arc::new(Mutex::new(process_terminal)),
+            WorkQueue::default(),
+            false,
+            read_channel,
+            WriteChannel::default(),
+        );
+
+        let mut graph = setup_test(node0, node1, process_terminal);
+        let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
+
+        graph.start();
+
+        assert_eq!(
+            output_check.recv_deadline(deadline).err().unwrap(),
+            RecvTimeoutError::Timeout
+        );
+
+        // If the queue does not block, the oldest message (timestamp 0) is overridden in the buffer
+        // so when the slow producer sends its message it cannot be synced with the fast producer.
+        let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
+        if block_full {
+            assert!(output_check.recv_deadline(deadline).is_ok());
+        } else {
+            assert_eq!(
+                output_check.recv_deadline(deadline).err().unwrap(),
+                RecvTimeoutError::Timeout
+            );
+        }
+    }
+
+    macro_rules! param_test {
+        ($name:ident, ($($block:ident),+)) => {
+            $(
+                paste::item! {
+                    #[test]
+                    fn [< $name _ $block >] () {
+                        $name($block);
+                    }
+                }
+            )+
+        }
+    }
+
+    param_test!(test_slow_consumers_blocks_if_configured, (true, false));
 }
