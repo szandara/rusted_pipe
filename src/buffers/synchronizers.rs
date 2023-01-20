@@ -206,7 +206,7 @@ mod tests {
     fn add_data(
         buffer: &Arc<Mutex<dyn OrderedBuffer>>,
         channel_id: String,
-        version_timestamp: u64,
+        version_timestamp: u128,
     ) {
         let packet = Packet::<String> {
             data: Box::new("data".to_string()),

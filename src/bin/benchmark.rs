@@ -72,7 +72,7 @@ impl Processor for TestNodeProducer {
                 &ChannelID::from("output_channel0"),
                 "Test".to_string(),
                 &DataVersion {
-                    timestamp: self.counter as u64,
+                    timestamp: self.counter as u128,
                 },
             )
             .unwrap();

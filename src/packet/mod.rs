@@ -1,5 +1,6 @@
 use std::any::{Any, TypeId};
 use std::marker::Copy;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam::deque::{Injector, Steal};
 use indexmap::IndexMap;
@@ -22,7 +23,18 @@ pub enum PacketError {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, Ord, PartialOrd)]
 pub struct DataVersion {
-    pub timestamp: u64,
+    pub timestamp: u128,
+}
+
+impl DataVersion {
+    pub fn from_now() -> Self {
+        DataVersion {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        }
+    }
 }
 
 impl PartialEq for DataVersion {
@@ -99,7 +111,7 @@ impl UntypedPacketCast for UntypedPacket {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PacketSet {
     data: IndexMap<ChannelID, Option<PacketWithAddress>>,
 }
@@ -152,6 +164,22 @@ impl PacketSet {
             .ok_or(PacketError::MissingChannel(channel_id.clone()))?
         {
             Some(maybe_packet_with_address) => Ok(maybe_packet_with_address.1.deref::<T>()?),
+            None => Err(PacketError::MissingChannel(channel_id.clone())),
+        }
+    }
+
+    pub fn get_channel_owned<T: 'static>(
+        &mut self,
+        channel_id: &ChannelID,
+    ) -> Result<Packet<T>, PacketError> {
+        match self
+            .data
+            .remove(channel_id)
+            .ok_or(PacketError::MissingChannel(channel_id.clone()))?
+        {
+            Some(maybe_packet_with_address) => {
+                Ok(maybe_packet_with_address.1.deref_owned::<T>()?)
+            }
             None => Err(PacketError::MissingChannel(channel_id.clone())),
         }
     }

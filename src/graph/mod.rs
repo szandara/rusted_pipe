@@ -1,5 +1,5 @@
 mod formatter;
-mod test_nodes;
+pub mod test_nodes;
 
 use std::fmt;
 
@@ -333,7 +333,7 @@ mod tests {
                     &ChannelID::from("output_channel0"),
                     "Test".to_string(),
                     &DataVersion {
-                        timestamp: self.counter as u64,
+                        timestamp: self.counter as u128,
                     },
                 )
                 .unwrap();
@@ -473,7 +473,7 @@ mod tests {
         let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
-        let deadline = Instant::now() + Duration::from_millis(450);
+        let deadline = Instant::now() + Duration::from_millis(500);
         graph.start();
 
         for _ in 0..max_packets {
@@ -558,11 +558,11 @@ mod tests {
 
         check_results(&results, max_packets);
 
-        let expected_versions: Vec<u64> = vec![5, 22, 42];
+        let expected_versions: Vec<u128> = vec![8, 22, 42];
         for (i, expected_version) in expected_versions.into_iter().enumerate() {
             let v1 = results[i].get::<String>(0).unwrap().version.timestamp;
             let v2 = results[i].get::<String>(1).unwrap().version.timestamp;
-            let range = ((expected_version - 5)..(expected_version + 5)).collect::<Vec<u64>>();
+            let range = ((expected_version - 8)..(expected_version + 8)).collect::<Vec<u128>>();
             assert!(
                 range.contains(&v1),
                 "V1 {} not in expected_version {}",

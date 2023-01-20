@@ -36,5 +36,5 @@ paste = { version = "^1.0.11" }
 spin_sleep = { version = "^1.1.1" }
  
 # Test packages
-# opencv = "0.74"
-
+opencv = "0.75"
+leptess = "0.13.2"

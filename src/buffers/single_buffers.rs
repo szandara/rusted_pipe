@@ -174,13 +174,13 @@ mod fixed_size_buffer_tests {
     fn test_buffer_inserts_and_drops_data_if_past_capacity<T: FixedSizeBuffer>() {
         let max_size = 32;
         let mut buffer = T::new(max_size, false);
-        for i in 0..(max_size + 10) as u64 {
+        for i in 0..(max_size + 10) as u128 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
             buffer.insert(version, packet.to_untyped()).unwrap();
             println!("{}", i);
-            if i >= max_size as u64 {
-                assert_eq!(buffer.peek().unwrap().timestamp, (i - max_size as u64) + 1);
+            if i >= max_size as u128 {
+                assert_eq!(buffer.peek().unwrap().timestamp, (i - max_size as u128) + 1);
             } else {
                 assert_eq!(buffer.peek().unwrap().timestamp, 0);
             }
