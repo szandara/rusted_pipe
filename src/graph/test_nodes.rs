@@ -96,7 +96,7 @@ impl Processor for BoundinBoxRender {
                 let intersection = bbox & plate.car;
                 let plate_text = plate.plate.as_ref().unwrap();
                 if intersection.size() >= plate.car.size() {
-                    let header = Rect::new(bbox.x, bbox.x, bbox.width, 20);
+                    let header = Rect::new(bbox.x, bbox.y, bbox.width, 20);
                     rectangle(
                         &mut im_array,
                         header,
@@ -109,7 +109,7 @@ impl Processor for BoundinBoxRender {
                     put_text(
                         &mut im_array,
                         plate_text,
-                        Point::new(bbox.x, bbox.y),
+                        Point::new(bbox.x, bbox.y + 20),
                         FONT_HERSHEY_PLAIN,
                         2.0,
                         Scalar::from((255.0, 255.0, 255.0)),
