@@ -130,7 +130,9 @@ impl Graph {
             self.node_threads.remove(n).join().unwrap();
         }
         for n in 0..self.read_threads.len() {
-            self.read_threads.remove(n).join().unwrap();
+            if n < self.read_threads.len() {
+                self.read_threads.remove(n).join().unwrap();
+            }
         }
     }
 }

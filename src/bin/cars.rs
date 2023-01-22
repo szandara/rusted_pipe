@@ -8,7 +8,7 @@ use std::{
 
 use rusted_pipe::{
     graph::{
-        test_nodes::{BoundinBoxRender, CarDetector, ImageReader, OcrReader},
+        test_nodes::{BoundinBoxRender, CarDetector, DnnOcrReader, ImageReader, OcrReader},
         Graph, Node,
     },
     packet::{ChannelID, WorkQueue},
@@ -24,7 +24,7 @@ fn setup_test() -> Graph {
     let processor = BoundinBoxRender::default();
     let boundingbox = Node::default(Arc::new(Mutex::new(processor)), WorkQueue::default(), false);
 
-    let processor = OcrReader::default();
+    let processor = DnnOcrReader::default();
     let ocr = Node::default(Arc::new(Mutex::new(processor)), WorkQueue::default(), false);
 
     let mut graph = Graph::new();
@@ -60,15 +60,23 @@ fn setup_test() -> Graph {
         )
         .unwrap();
 
-    // graph
-    //     .link(
-    //         &"ImageReader".to_string(),
-    //         &ChannelID::from("image"),
-    //         &"OcrReader".to_string(),
-    //         &ChannelID::from("image"),
-    //     )
-    //     .unwrap();
+    graph
+        .link(
+            &"ImageReader".to_string(),
+            &ChannelID::from("image"),
+            &"DnnOcrReader".to_string(),
+            &ChannelID::from("image"),
+        )
+        .unwrap();
 
+    graph
+        .link(
+            &"DnnOcrReader".to_string(),
+            &ChannelID::from("plates"),
+            &"BoundinBoxRender".to_string(),
+            &ChannelID::from("plates"),
+        )
+        .unwrap();
     return graph;
 }
 
@@ -76,6 +84,6 @@ fn main() {
     let mut graph = setup_test();
 
     graph.start();
-    thread::sleep(Duration::from_millis(2600));
+    thread::sleep(Duration::from_millis(50000));
     graph.stop();
 }
