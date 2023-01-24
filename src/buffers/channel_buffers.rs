@@ -6,9 +6,8 @@ use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
 
-use itertools::Itertools;
-
 use super::PacketBufferAddress;
+use itertools::Itertools;
 use std::collections::HashMap;
 
 pub struct BoundedBufferedData<T: FixedSizeBuffer> {
@@ -57,6 +56,14 @@ impl<T: FixedSizeBuffer> DataBuffer for BoundedBufferedData<T> {
         }
 
         let buffer = self.get_channel(channel)?;
+
+        log::debug!(
+            "Adding version {:?} to channle {:?}, size {:?}",
+            packet.version,
+            channel,
+            buffer.len()
+        );
+
         let data_version = (channel.clone(), packet.version.clone());
         buffer.insert(packet.version.clone(), packet)?;
         Ok(data_version)

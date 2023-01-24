@@ -2,6 +2,7 @@ use super::ChannelError;
 use super::UntypedReceiverChannel;
 
 use crate::buffers::single_buffers::FixedSizeBTree;
+use crate::buffers::single_buffers::RtRingBuffer;
 use crate::packet::ChannelID;
 
 use crate::packet::UntypedPacket;
@@ -33,12 +34,12 @@ pub struct ReadChannel {
 }
 
 unsafe impl Send for ReadEvent {}
-const MAX_BUFFER_PER_CHANNEL: usize = 1000;
+const MAX_BUFFER_PER_CHANNEL: usize = 2000;
 
 impl ReadChannel {
     pub fn default() -> Self {
         ReadChannel {
-            buffered_data: Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
+            buffered_data: Arc::new(Mutex::new(BoundedBufferedData::<RtRingBuffer>::new(
                 MAX_BUFFER_PER_CHANNEL,
                 false,
             ))),

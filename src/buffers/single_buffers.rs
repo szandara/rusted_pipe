@@ -178,7 +178,6 @@ mod fixed_size_buffer_tests {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
             buffer.insert(version, packet.to_untyped()).unwrap();
-            println!("{}", i);
             if i >= max_size as u128 {
                 assert_eq!(buffer.peek().unwrap().timestamp, (i - max_size as u128) + 1);
             } else {
