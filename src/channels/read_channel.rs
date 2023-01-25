@@ -1,7 +1,6 @@
 use super::ChannelError;
 use super::UntypedReceiverChannel;
 
-
 use crate::buffers::single_buffers::RtRingBuffer;
 use crate::packet::ChannelID;
 
@@ -148,6 +147,10 @@ impl ReadChannel {
     }
 
     pub fn stop(&mut self) -> () {}
+
+    pub fn are_buffers_empty(&self) -> bool {
+        self.buffered_data.lock().unwrap().are_buffers_empty()
+    }
 }
 
 #[cfg(test)]

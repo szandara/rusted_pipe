@@ -112,6 +112,15 @@ impl<T: FixedSizeBuffer> OrderedBuffer for BoundedBufferedData<T> {
         let channel = (self.get_channel(channel))?;
         return Ok(channel.pop());
     }
+
+    fn are_buffers_empty(&self) -> bool {
+        for channel in self.data.iter() {
+            if channel.1.len() > 0 {
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 #[cfg(test)]

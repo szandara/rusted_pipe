@@ -42,4 +42,6 @@ pub trait OrderedBuffer: DataBuffer {
     fn peek(&self, channel: &ChannelID) -> Option<&DataVersion>;
 
     fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError>;
+
+    fn are_buffers_empty(&self) -> bool;
 }

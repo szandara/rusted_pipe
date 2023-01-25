@@ -1,10 +1,10 @@
 pub mod formatter;
 
+use std::collections::HashSet;
 use std::fmt;
 
 use std::sync::Arc;
 use std::sync::Mutex;
-
 
 use std::thread;
 use std::thread::JoinHandle;
@@ -12,12 +12,14 @@ use std::time::Duration;
 
 use crate::packet::WorkQueue;
 use atomic::Atomic;
+use crossbeam::channel::unbounded;
+use crossbeam::channel::Receiver;
 use crossbeam::channel::Select;
-
+use crossbeam::channel::Sender;
 
 use crate::packet::PacketSet;
 use downcast_rs::{impl_downcast, Downcast};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
 use super::channels::{untyped_channel, ReadChannel, WriteChannel};
 use crate::packet::ChannelID;
@@ -34,9 +36,12 @@ pub fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue) -> N
 
 pub struct Graph {
     nodes: IndexMap<String, Node>,
+    running_nodes: HashSet<String>,
     running: Arc<Atomic<GraphStatus>>,
     node_threads: Vec<JoinHandle<()>>,
     read_threads: Vec<JoinHandle<()>>,
+    worker_done: (Sender<usize>, Receiver<usize>),
+    reader_empty: (Sender<usize>, Receiver<usize>),
 }
 
 impl Graph {
@@ -44,8 +49,11 @@ impl Graph {
         Graph {
             nodes: IndexMap::<String, Node>::default(),
             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
+            running_nodes: Default::default(),
             node_threads: Vec::<JoinHandle<()>>::default(),
             read_threads: Vec::<JoinHandle<()>>::default(),
+            worker_done: unbounded::<usize>(),
+            reader_empty: unbounded::<usize>(),
         }
     }
 
@@ -94,7 +102,7 @@ impl Graph {
 
         while !self.nodes.is_empty() {
             let processor = self.nodes.pop().unwrap();
-
+            self.running_nodes.insert(processor.0.clone());
             let (_id, write_channel, mut read_channel, handler, work_queue) = processor.1.start();
 
             let assigned_node_id = node_id;
@@ -106,8 +114,14 @@ impl Graph {
             read_channel.start(assigned_node_id, work_queue.clone());
 
             if !is_source {
+                let done_channel = self.reader_empty.0.clone();
                 self.read_threads.push(thread::spawn(move || {
-                    read_channel_data(reading_running_thread, read_channel)
+                    read_channel_data(
+                        assigned_node_id,
+                        reading_running_thread,
+                        read_channel,
+                        done_channel,
+                    )
                 }));
             }
 
@@ -116,7 +130,7 @@ impl Graph {
                 work_queue: work_queue_processor,
                 processor: handler.clone(),
                 write_channel: arc_write_channel.clone(),
-                status: Arc::new(AtomicUsize::new(0)),
+                status: Arc::new(Atomic::new(WorkerStatus::Idle)),
                 is_source,
             });
 
@@ -124,12 +138,31 @@ impl Graph {
         }
 
         let consume_running_thread = self.running.clone();
+        let done_channel = self.worker_done.0.clone();
         self.node_threads.push(thread::spawn(move || {
-            consume(consume_running_thread, workers)
+            consume(consume_running_thread, workers, done_channel)
         }));
     }
 
-    pub fn stop(&mut self) {
+    pub fn stop(&mut self, wait_for_data: bool) {
+        let mut empty_set = HashSet::new();
+
+        if wait_for_data {
+            // Wait for all buffers to be empty
+            self.running
+                .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
+
+            while empty_set.len() != self.running_nodes.len() {
+                let done = self.worker_done.1.recv().unwrap();
+                empty_set.insert(done);
+            }
+
+            empty_set.clear();
+            while empty_set.len() != self.read_threads.len() {
+                let done = self.reader_empty.1.recv().unwrap();
+                empty_set.insert(done);
+            }
+        }
         self.running
             .swap(GraphStatus::Terminating, Ordering::Relaxed);
 
@@ -148,7 +181,7 @@ struct ProcessorWorker {
     work_queue: Arc<WorkQueue>,
     processor: ProcessorSafe,
     write_channel: Arc<Mutex<WriteChannel>>,
-    status: Arc<AtomicUsize>,
+    status: Arc<Atomic<WorkerStatus>>,
     is_source: bool,
 }
 
@@ -156,55 +189,87 @@ struct ProcessorWorker {
 enum GraphStatus {
     Running = 0,
     Terminating = 1,
+    WaitingForDataToTerminate = 2,
 }
 
-fn consume(running: Arc<Atomic<GraphStatus>>, workers: Vec<ProcessorWorker>) {
+#[derive(Clone, Copy, PartialEq)]
+enum WorkerStatus {
+    Idle = 0,
+    Running = 1,
+    Terminating = 2,
+    WaitingForDataToTerminate = 3,
+}
+
+fn consume(
+    running: Arc<Atomic<GraphStatus>>,
+    workers: Vec<ProcessorWorker>,
+    done_notification: Sender<usize>,
+) {
     let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
-    let mut has_inflight_data = vec![false; workers.len()];
-    while running.load(Ordering::Relaxed) == GraphStatus::Running {
+    while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
+        let mut terminated = 0;
         for (i, worker) in workers.iter().enumerate() {
-            if worker.status.load(Ordering::SeqCst) == 0 {
+            if worker.status.load(Ordering::Relaxed) == WorkerStatus::Terminating {
+                terminated += 1;
+                if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
+                    done_notification.send(i).unwrap();
+                }
+            } else if worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
                 let lock_status = worker.status.clone();
                 let arc_write_channel = worker.write_channel.clone();
                 let worker_clone = worker.processor.clone();
-                if worker.is_source {
-                    worker.status.store(1, Ordering::SeqCst);
-                    let future = async move {
-                        worker_clone
-                            .lock()
-                            .unwrap()
-                            .handle(PacketSet::default(), arc_write_channel)
-                            .unwrap();
-                        lock_status.store(0, Ordering::SeqCst);
-                    };
-
-                    thread_pool.spawn_ok(future);
-                } else {
+                let mut packet = PacketSet::default();
+                if !worker.is_source {
                     let task = worker.work_queue.steal();
-
                     if let Some(read_event) = task.success() {
-                        has_inflight_data[i] = true;
-                        worker.status.store(1, Ordering::SeqCst);
-                        let future = async move {
-                            worker_clone
-                                .lock()
-                                .unwrap()
-                                .handle(read_event.packet_data, arc_write_channel)
-                                .unwrap();
-
-                            lock_status.store(0, Ordering::SeqCst);
-                        };
-                        thread_pool.spawn_ok(future);
+                        packet = read_event.packet_data;
                     } else {
-                        has_inflight_data[i] = false;
+                        if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate
+                        {
+                            done_notification.send(i).unwrap();
+                        }
+                        continue;
                     }
                 }
+
+                worker
+                    .status
+                    .store(WorkerStatus::Running, Ordering::Relaxed);
+                let future = async move {
+                    match worker_clone
+                        .lock()
+                        .unwrap()
+                        .handle(packet, arc_write_channel)
+                    {
+                        Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
+                        Err(RustedPipeError::EndOfStream()) => {
+                            println!("Terminating worker {:?}", i);
+                            lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed)
+                        }
+                        Err(err) => {
+                            println!("Error in worker {:?}: {:?}", i, err);
+                            lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
+                        }
+                    }
+                };
+
+                thread_pool.spawn_ok(future);
             }
+        }
+
+        if terminated == workers.len() {
+            println!("All workers are terminated");
+            break;
         }
     }
 }
 
-fn read_channel_data(running: Arc<Atomic<GraphStatus>>, mut read_channel: ReadChannel) {
+fn read_channel_data(
+    id: usize,
+    running: Arc<Atomic<GraphStatus>>,
+    mut read_channel: ReadChannel,
+    done_notification: Sender<usize>,
+) {
     let max_range = read_channel.available_channels().len();
 
     if max_range == 0 {
@@ -220,12 +285,24 @@ fn read_channel_data(running: Arc<Atomic<GraphStatus>>, mut read_channel: ReadCh
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
         let channel_index = selector.ready_timeout(Duration::from_millis(100));
         if channel_index.is_err() {
+            if read_channel.are_buffers_empty() {
+                done_notification.send(id).unwrap();
+            }
             continue;
         }
         match read_channel.try_read_index(channel_index.unwrap()) {
             Ok(_) => (),
             Err(err) => {
-                eprintln!("Exception while reading {:?}. Skipping", err);
+                eprintln!("Exception while reading {:?}", err);
+                match err {
+                    crate::channels::ChannelError::ReceiveError(err) => {
+                        if err.is_disconnected() {
+                            eprintln!("Channel is disonnected, closing");
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -233,7 +310,6 @@ fn read_channel_data(running: Arc<Atomic<GraphStatus>>, mut read_channel: ReadCh
 }
 
 /// PROCESSORS
-
 pub struct Node {
     pub id: String,
     pub write_channel: WriteChannel,
@@ -315,14 +391,16 @@ mod tests {
         id: String,
         produce_time_ms: u64,
         counter: usize,
+        max_packets: usize,
     }
 
     impl TestNodeProducer {
-        fn new(id: String, produce_time_ms: u64, _max_packets: usize) -> Self {
+        fn new(id: String, produce_time_ms: u64, max_packets: usize) -> Self {
             TestNodeProducer {
                 id,
                 produce_time_ms,
                 counter: 0,
+                max_packets,
             }
         }
     }
@@ -334,6 +412,10 @@ mod tests {
             output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
             thread::sleep(Duration::from_millis(self.produce_time_ms));
+            if self.counter == self.max_packets {
+                return Err(RustedPipeError::EndOfStream());
+            }
+
             let s = SystemTime::now();
             output_channel
                 .lock()
@@ -495,7 +577,42 @@ mod tests {
 
         check_results(&results, max_packets);
 
-        graph.stop();
+        graph.stop(false);
+    }
+
+    #[test]
+    fn test_graph_waits_for_data_if_stop_flag() {
+        let max_packets = 100;
+        let mock_processing_time_ms = 3;
+
+        let node0 = TestNodeProducer::new(
+            "producer1".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+        let node1 = TestNodeProducer::new(
+            "producer2".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+
+        let (mut graph, output_check) = setup_default_test(node0, node1, 10, WorkQueue::default());
+
+        let mut results = Vec::with_capacity(max_packets);
+        let deadline = Instant::now() + Duration::from_millis(500);
+        graph.start();
+        thread::sleep(Duration::from_millis(100));
+        graph.stop(true);
+
+        for _ in 0..max_packets {
+            let data = output_check.recv_deadline(deadline);
+            if data.is_err() {
+                break;
+            }
+            results.push(data.unwrap());
+        }
+
+        check_results(&results, max_packets);
     }
 
     #[test]
