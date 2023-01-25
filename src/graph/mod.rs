@@ -1,20 +1,23 @@
-mod formatter;
+pub mod formatter;
 
 use std::fmt;
 
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use std::sync::atomic::AtomicBool;
+
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crate::packet::WorkQueue;
+use atomic::Atomic;
 use crossbeam::channel::Select;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::packet::PacketSet;
+use downcast_rs::{impl_downcast, Downcast};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::channels::{untyped_channel, ReadChannel, WriteChannel};
 use crate::packet::ChannelID;
@@ -23,14 +26,15 @@ use super::RustedPipeError;
 use indexmap::IndexMap;
 
 type ProcessorSafe = Arc<Mutex<dyn Processor>>;
+impl_downcast!(Processor);
 
-fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue, is_source: bool) -> Node {
-    Node::default(Arc::new(Mutex::new(processor)), work_queue, is_source)
+pub fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue) -> Node {
+    Node::default(Arc::new(Mutex::new(processor)), work_queue)
 }
 
 pub struct Graph {
     nodes: IndexMap<String, Node>,
-    running: Arc<AtomicBool>,
+    running: Arc<Atomic<GraphStatus>>,
     node_threads: Vec<JoinHandle<()>>,
     read_threads: Vec<JoinHandle<()>>,
 }
@@ -39,7 +43,7 @@ impl Graph {
     pub fn new() -> Self {
         Graph {
             nodes: IndexMap::<String, Node>::default(),
-            running: Arc::new(AtomicBool::new(false)),
+            running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
             node_threads: Vec::<JoinHandle<()>>::default(),
             read_threads: Vec::<JoinHandle<()>>::default(),
         }
@@ -49,6 +53,10 @@ impl Graph {
         let node_id = node.id.clone();
         self.nodes.entry(node_id).or_insert(node);
         Ok(())
+    }
+
+    pub fn nodes(&self) -> &IndexMap<String, Node> {
+        return &self.nodes;
     }
 
     pub fn link(
@@ -71,8 +79,6 @@ impl Graph {
             .get_mut(to_node_id)
             .ok_or(RustedPipeError::MissingNodeError(to_node_id.clone()))?;
 
-        receiver_node.is_source = false;
-
         receiver_node
             .read_channel
             .add_channel(to_port, channel_receiver)
@@ -84,18 +90,18 @@ impl Graph {
     pub fn start(&mut self) {
         let mut node_id = 0;
         let mut workers = Vec::default();
-        self.running.swap(true, Ordering::Relaxed);
+        self.running.swap(GraphStatus::Running, Ordering::Relaxed);
 
         while !self.nodes.is_empty() {
             let processor = self.nodes.pop().unwrap();
 
-            let (_id, is_source, write_channel, mut read_channel, handler, work_queue) =
-                processor.1.start();
+            let (_id, write_channel, mut read_channel, handler, work_queue) = processor.1.start();
 
             let assigned_node_id = node_id;
             let work_queue = Arc::new(work_queue);
             let arc_write_channel = Arc::new(Mutex::new(write_channel));
             let reading_running_thread = self.running.clone();
+            let is_source = read_channel.available_channels().len() == 0;
 
             read_channel.start(assigned_node_id, work_queue.clone());
 
@@ -124,7 +130,9 @@ impl Graph {
     }
 
     pub fn stop(&mut self) {
-        self.running.swap(false, Ordering::Relaxed);
+        self.running
+            .swap(GraphStatus::Terminating, Ordering::Relaxed);
+
         for n in 0..self.node_threads.len() {
             self.node_threads.remove(n).join().unwrap();
         }
@@ -144,11 +152,17 @@ struct ProcessorWorker {
     is_source: bool,
 }
 
-fn consume(running: Arc<AtomicBool>, workers: Vec<ProcessorWorker>) {
-    let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
+#[derive(Clone, Copy, PartialEq)]
+enum GraphStatus {
+    Running = 0,
+    Terminating = 1,
+}
 
-    while running.load(Ordering::Relaxed) {
-        for worker in workers.iter() {
+fn consume(running: Arc<Atomic<GraphStatus>>, workers: Vec<ProcessorWorker>) {
+    let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
+    let mut has_inflight_data = vec![false; workers.len()];
+    while running.load(Ordering::Relaxed) == GraphStatus::Running {
+        for (i, worker) in workers.iter().enumerate() {
             if worker.status.load(Ordering::SeqCst) == 0 {
                 let lock_status = worker.status.clone();
                 let arc_write_channel = worker.write_channel.clone();
@@ -169,6 +183,7 @@ fn consume(running: Arc<AtomicBool>, workers: Vec<ProcessorWorker>) {
                     let task = worker.work_queue.steal();
 
                     if let Some(read_event) = task.success() {
+                        has_inflight_data[i] = true;
                         worker.status.store(1, Ordering::SeqCst);
                         let future = async move {
                             worker_clone
@@ -180,6 +195,8 @@ fn consume(running: Arc<AtomicBool>, workers: Vec<ProcessorWorker>) {
                             lock_status.store(0, Ordering::SeqCst);
                         };
                         thread_pool.spawn_ok(future);
+                    } else {
+                        has_inflight_data[i] = false;
                     }
                 }
             }
@@ -187,7 +204,7 @@ fn consume(running: Arc<AtomicBool>, workers: Vec<ProcessorWorker>) {
     }
 }
 
-fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
+fn read_channel_data(running: Arc<Atomic<GraphStatus>>, mut read_channel: ReadChannel) {
     let max_range = read_channel.available_channels().len();
 
     if max_range == 0 {
@@ -200,11 +217,16 @@ fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
         selector.recv(channel);
     }
 
-    while running.load(Ordering::Relaxed) {
-        let channel_index = selector.ready();
-        match read_channel.try_read_index(channel_index) {
+    while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
+        let channel_index = selector.ready_timeout(Duration::from_millis(100));
+        if channel_index.is_err() {
+            continue;
+        }
+        match read_channel.try_read_index(channel_index.unwrap()) {
             Ok(_) => (),
-            Err(err) => eprintln!("Exception while reading {:?}. Skipping", err),
+            Err(err) => {
+                eprintln!("Exception while reading {:?}. Skipping", err);
+            }
         }
     }
     read_channel.stop();
@@ -213,12 +235,11 @@ fn read_channel_data(running: Arc<AtomicBool>, mut read_channel: ReadChannel) {
 /// PROCESSORS
 
 pub struct Node {
-    id: String,
-    is_source: bool,
-    write_channel: WriteChannel,
-    read_channel: ReadChannel,
-    handler: ProcessorSafe,
-    work_queue: WorkQueue,
+    pub id: String,
+    pub write_channel: WriteChannel,
+    pub read_channel: ReadChannel,
+    pub handler: ProcessorSafe,
+    pub work_queue: WorkQueue,
 }
 
 impl fmt::Debug for Node {
@@ -228,10 +249,9 @@ impl fmt::Debug for Node {
 }
 
 impl Node {
-    pub fn default(handler: ProcessorSafe, work_queue: WorkQueue, is_source: bool) -> Self {
+    pub fn default(handler: ProcessorSafe, work_queue: WorkQueue) -> Self {
         Node {
             id: handler.lock().unwrap().id().clone(),
-            is_source,
             write_channel: WriteChannel::default(),
             read_channel: ReadChannel::default(),
             handler: handler.clone(),
@@ -242,13 +262,11 @@ impl Node {
     pub fn new(
         handler: ProcessorSafe,
         work_queue: WorkQueue,
-        is_source: bool,
         read_channel: ReadChannel,
         write_channel: WriteChannel,
     ) -> Self {
         Node {
             id: handler.lock().unwrap().id().clone(),
-            is_source,
             write_channel,
             read_channel,
             handler: handler.clone(),
@@ -256,19 +274,9 @@ impl Node {
         }
     }
 
-    fn start(
-        self,
-    ) -> (
-        String,
-        bool,
-        WriteChannel,
-        ReadChannel,
-        ProcessorSafe,
-        WorkQueue,
-    ) {
+    fn start(self) -> (String, WriteChannel, ReadChannel, ProcessorSafe, WorkQueue) {
         (
             self.id,
-            self.is_source,
             self.write_channel,
             self.read_channel,
             self.handler,
@@ -277,7 +285,7 @@ impl Node {
     }
 }
 
-pub trait Processor: Sync + Send {
+pub trait Processor: Sync + Send + Downcast {
     fn handle(
         &mut self,
         input: PacketSet,
@@ -310,7 +318,7 @@ mod tests {
     }
 
     impl TestNodeProducer {
-        fn new(id: String, produce_time_ms: u64, max_packets: usize) -> Self {
+        fn new(id: String, produce_time_ms: u64, _max_packets: usize) -> Self {
             TestNodeProducer {
                 id,
                 produce_time_ms,
@@ -432,12 +440,12 @@ mod tests {
         consume_time_ms: u64,
         consumer_queue_strategy: WorkQueue,
     ) -> (Graph, Receiver<PacketSet>) {
-        let node0 = new_node(node0, WorkQueue::default(), true);
-        let node1 = new_node(node1, WorkQueue::default(), true);
+        let node0 = new_node(node0, WorkQueue::default());
+        let node1 = new_node(node1, WorkQueue::default());
 
         let (output, output_check) = unbounded();
         let process_terminal = TestNodeConsumer::new(output.clone(), consume_time_ms);
-        let process_terminal = new_node(process_terminal, consumer_queue_strategy, false);
+        let process_terminal = new_node(process_terminal, consumer_queue_strategy);
 
         (setup_test(node0, node1, process_terminal), output_check)
     }
@@ -514,7 +522,7 @@ mod tests {
 
         graph.start();
 
-        for i in 0..max_packets {
+        for _i in 0..max_packets {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
                 break;
@@ -549,7 +557,7 @@ mod tests {
 
         graph.start();
 
-        for i in 0..max_packets {
+        for _i in 0..max_packets {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
                 break;
@@ -587,8 +595,8 @@ mod tests {
         let node0 = TestNodeProducer::new("producer1".to_string(), 60, max_packets);
         let node1 = TestNodeProducer::new("producer2".to_string(), 5, max_packets);
 
-        let node0 = new_node(node0, WorkQueue::default(), true);
-        let node1 = new_node(node1, WorkQueue::default(), true);
+        let node0 = new_node(node0, WorkQueue::default());
+        let node1 = new_node(node1, WorkQueue::default());
 
         let (output, output_check) = unbounded();
         let process_terminal = TestNodeConsumer::new(output.clone(), 0);
@@ -603,7 +611,6 @@ mod tests {
         let process_terminal = Node::new(
             Arc::new(Mutex::new(process_terminal)),
             WorkQueue::default(),
-            false,
             read_channel,
             WriteChannel::default(),
         );

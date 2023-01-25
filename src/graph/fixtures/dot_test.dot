@@ -1,4 +1,11 @@
 strict digraph test {
-    source1 -> sink
-    source2 -> sink
+    source1;
+    source2;
+    mid1;
+    sink;
+
+    source1:"source1" -> mid1:"source1"
+    source2:"source2" -> sink:"source2"
+
+    mid1:"mid1" -> sink:"mid1"
 }

@@ -1,7 +1,7 @@
 use super::ChannelError;
 use super::UntypedReceiverChannel;
 
-use crate::buffers::single_buffers::FixedSizeBTree;
+
 use crate::buffers::single_buffers::RtRingBuffer;
 use crate::packet::ChannelID;
 

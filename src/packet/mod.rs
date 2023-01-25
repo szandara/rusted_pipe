@@ -234,8 +234,17 @@ impl ChannelID {
     pub fn new(id: String) -> Self {
         ChannelID { id }
     }
-    pub fn from(id: &str) -> Self {
+}
+
+impl From<&str> for ChannelID {
+    fn from(id: &str) -> Self {
         ChannelID { id: id.to_string() }
+    }
+}
+
+impl From<String> for ChannelID {
+    fn from(id: String) -> Self {
+        ChannelID { id }
     }
 }
 
