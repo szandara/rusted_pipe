@@ -108,8 +108,8 @@ impl<T: FixedSizeBuffer> OrderedBuffer for BoundedBufferedData<T> {
         }
     }
 
-    fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError> {
-        let channel = (self.get_channel(channel))?;
+    fn pop(&mut self, channel_id: &ChannelID) -> Result<Option<UntypedPacket>, BufferError> {
+        let channel = (self.get_channel(channel_id))?;
         return Ok(channel.pop());
     }
 

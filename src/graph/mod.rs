@@ -112,7 +112,6 @@ impl Graph {
             let is_source = read_channel.available_channels().len() == 0;
 
             read_channel.start(assigned_node_id, work_queue.clone());
-
             if !is_source {
                 let done_channel = self.reader_empty.0.clone();
                 self.read_threads.push(thread::spawn(move || {
@@ -377,7 +376,7 @@ mod tests {
 
     use crate::buffers::channel_buffers::BoundedBufferedData;
     use crate::buffers::single_buffers::FixedSizeBTree;
-    use crate::buffers::synchronizers::TimestampSynchronizer;
+    use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
     use crate::DataVersion;
     use crossbeam::channel::unbounded;
     use crossbeam::channel::Receiver;
@@ -472,7 +471,7 @@ mod tests {
             _output_channel: Arc<Mutex<WriteChannel>>,
         ) -> Result<(), RustedPipeError> {
             println!(
-                "Receved {} at {}",
+                "Recevied {} at {}",
                 self.counter,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -652,7 +651,7 @@ mod tests {
 
     #[test]
     fn test_slow_consumers_data_is_dropped_real_time_queue() {
-        let max_packets = 3;
+        let max_packets = 100;
         let mock_processing_time_ms = 4;
         let collection_time_ms: u64 = 600;
 
@@ -673,18 +672,18 @@ mod tests {
         let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
 
         graph.start();
-
-        for _i in 0..max_packets {
+        let expected_versions: Vec<u128> = vec![8, 22, 42];
+        for _i in 0..expected_versions.len() {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
+                println!("Error receiving {:?}", data.err().unwrap());
                 break;
             }
             results.push(data.unwrap());
         }
 
-        check_results(&results, max_packets);
+        check_results(&results, expected_versions.len());
 
-        let expected_versions: Vec<u128> = vec![8, 22, 42];
         for (i, expected_version) in expected_versions.into_iter().enumerate() {
             let v1 = results[i].get::<String>(0).unwrap().version.timestamp;
             let v2 = results[i].get::<String>(1).unwrap().version.timestamp;

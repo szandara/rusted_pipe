@@ -7,8 +7,8 @@ use crate::packet::ChannelID;
 use crate::packet::UntypedPacket;
 
 use crate::buffers::channel_buffers::BoundedBufferedData;
+use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
 use crate::buffers::synchronizers::PacketSynchronizer;
-use crate::buffers::synchronizers::TimestampSynchronizer;
 
 use crate::buffers::{OrderedBuffer, PacketBufferAddress};
 use crossbeam::channel::Receiver;
@@ -160,7 +160,7 @@ mod tests {
 
     use crate::buffers::channel_buffers::BoundedBufferedData;
     use crate::buffers::single_buffers::FixedSizeBTree;
-    use crate::buffers::synchronizers::TimestampSynchronizer;
+    use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
     use crate::channels::untyped_channel;
     use crate::channels::ChannelID;
     use crate::channels::ReadChannel;

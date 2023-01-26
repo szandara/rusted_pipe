@@ -78,7 +78,7 @@ impl GraphFormatter for DotFormatter {
                 for node in stmts.iter() {
                     match node {
                         dot_structures::Stmt::Node(node) => {
-                            println!("{:?}", node.id.0.to_string());
+                            println!("Adding node {:?}", node.id.0.to_string());
                             let processor = registry.nodes.get(&node.id.0.to_string()).unwrap()();
                             graph.add_node(processor).unwrap();
                         }
