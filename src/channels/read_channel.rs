@@ -89,7 +89,6 @@ impl ReadChannel {
         packet: UntypedPacket,
         channel: ChannelID,
     ) -> Result<PacketBufferAddress, ChannelError> {
-        let channels = self.available_channels().iter().cloned().collect();
         let packet_address = self
             .buffered_data
             .lock()
@@ -97,11 +96,8 @@ impl ReadChannel {
             .insert(&channel, packet)?;
 
         if let Some(maybe_work_queue) = &self.work_queue {
-            self.synch_strategy.synchronize(
-                &mut self.buffered_data,
-                &channels,
-                maybe_work_queue.clone(),
-            );
+            self.synch_strategy
+                .synchronize(&mut self.buffered_data, maybe_work_queue.clone());
             return Ok(packet_address);
         }
         return Err(ChannelError::NotInitializedError);
