@@ -2,7 +2,6 @@ pub mod first_sync;
 pub mod timestamp;
 
 use crate::buffers::OrderedBuffer;
-use crate::buffers::PacketBufferAddress;
 use crate::packet::ChannelID;
 use crate::DataVersion;
 
@@ -89,15 +88,15 @@ fn get_packets_for_version(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::buffers::channel_buffers::BoundedBufferedData;
     use crate::buffers::single_buffers::FixedSizeBTree;
-    use crate::buffers::{DataBuffer, PacketBufferAddress};
+    use crate::buffers::DataBuffer;
     use crate::channels::{ChannelID, Packet};
     use crate::DataVersion;
 
-    fn create_test_buffer() -> BoundedBufferedData<FixedSizeBTree> {
+    pub fn create_test_buffer() -> BoundedBufferedData<FixedSizeBTree> {
         let mut buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
 
         buffer
@@ -109,42 +108,7 @@ mod tests {
         return buffer;
     }
 
-    #[test]
-    fn test_read_channel_fails_if_channel_not_added() {
-        let buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
-        let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
-
-        let packet = Packet::<String> {
-            data: Box::new("data".to_string()),
-            version: DataVersion { timestamp: 0 },
-        };
-
-        safe_buffer
-            .lock()
-            .unwrap()
-            .create_channel(&ChannelID::new("test1".to_string()))
-            .unwrap();
-
-        assert!(safe_buffer
-            .lock()
-            .unwrap()
-            .insert(
-                &ChannelID::new("test1".to_string()),
-                packet.clone().to_untyped(),
-            )
-            .is_ok());
-
-        assert!(safe_buffer
-            .lock()
-            .unwrap()
-            .insert(
-                &ChannelID::new("test3".to_string()),
-                packet.clone().to_untyped(),
-            )
-            .is_err());
-    }
-
-    fn add_data(
+    pub fn add_data(
         buffer: &Arc<Mutex<dyn OrderedBuffer>>,
         channel_id: String,
         version_timestamp: u128,
@@ -167,14 +131,6 @@ mod tests {
     fn test_timestamp_synchronize_is_none_if_no_data_on_channel() {
         let buffer = create_test_buffer();
         let mut safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
-        let channels = vec![
-            ChannelID {
-                id: "test1".to_string(),
-            },
-            ChannelID {
-                id: "test2".to_string(),
-            },
-        ];
 
         add_data(&safe_buffer, "test1".to_string(), 2);
         add_data(&safe_buffer, "test1".to_string(), 3);

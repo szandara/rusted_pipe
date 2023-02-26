@@ -196,7 +196,6 @@ enum WorkerStatus {
     Idle = 0,
     Running = 1,
     Terminating = 2,
-    WaitingForDataToTerminate = 3,
 }
 
 fn consume(

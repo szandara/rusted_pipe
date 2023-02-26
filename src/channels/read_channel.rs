@@ -157,6 +157,7 @@ mod tests {
     use crate::buffers::channel_buffers::BoundedBufferedData;
     use crate::buffers::single_buffers::FixedSizeBTree;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
+    use crate::buffers::OrderedBuffer;
     use crate::channels::untyped_channel;
     use crate::channels::ChannelID;
     use crate::channels::ReadChannel;
@@ -280,6 +281,41 @@ mod tests {
         packet.version.timestamp = 3;
         assert!(read_channel
             .insert_packet(packet.clone().to_untyped(), channel.clone())
+            .is_err());
+    }
+
+    #[test]
+    fn test_read_channel_fails_if_channel_not_added() {
+        let buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
+        let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
+
+        let packet = Packet::<String> {
+            data: Box::new("data".to_string()),
+            version: DataVersion { timestamp: 0 },
+        };
+
+        safe_buffer
+            .lock()
+            .unwrap()
+            .create_channel(&ChannelID::new("test1".to_string()))
+            .unwrap();
+
+        assert!(safe_buffer
+            .lock()
+            .unwrap()
+            .insert(
+                &ChannelID::new("test1".to_string()),
+                packet.clone().to_untyped(),
+            )
+            .is_ok());
+
+        assert!(safe_buffer
+            .lock()
+            .unwrap()
+            .insert(
+                &ChannelID::new("test3".to_string()),
+                packet.clone().to_untyped(),
+            )
             .is_err());
     }
 }

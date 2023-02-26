@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam::deque::{Injector, Steal};
 use indexmap::IndexMap;
-use itertools::Itertools;
 use thiserror::Error;
 
 use crate::buffers::PacketWithAddress;
