@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam::deque::{Injector, Steal};
 use indexmap::IndexMap;
+use itertools::Itertools;
 use thiserror::Error;
 
 use crate::buffers::PacketWithAddress;
@@ -123,6 +124,10 @@ impl PacketSet {
 
     pub fn channels(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn values(&self) -> Vec<&Option<PacketWithAddress>> {
+        self.data.values().into_iter().collect_vec()
     }
 
     pub fn has_none(&self) -> bool {

@@ -6,19 +6,15 @@ use crate::channels::ChannelID;
 use crate::packet::WorkQueue;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 #[derive(Debug, Default)]
-pub struct FirstSyncSynchronizer {
-    last_ship: Option<Instant>,
-}
+pub struct FirstSyncSynchronizer {}
 
 fn find_common_min<'a>(mut iterators: Vec<Box<BufferIterator>>) -> Option<DataVersion> {
     let mut min = None;
     let mut matches = 0;
     loop {
         let mut all_end = true;
-        matches = 0;
         for iterator in iterators.iter_mut() {
             if min.is_none() {
                 let mut peekable = iterator.peekable();
@@ -29,9 +25,11 @@ fn find_common_min<'a>(mut iterators: Vec<Box<BufferIterator>>) -> Option<DataVe
                 }
                 continue;
             }
+
             while let Some(next) = iterator.next() {
                 if next.version.timestamp > min.unwrap().version.timestamp {
                     min = Some(next);
+                    matches = 1;
                     all_end = false;
                     break;
                 } else if next.version.timestamp == min.unwrap().version.timestamp {
@@ -61,10 +59,6 @@ impl PacketSynchronizer for FirstSyncSynchronizer {
         ordered_buffer: &Arc<Mutex<dyn OrderedBuffer>>,
         work_queue: Arc<WorkQueue>,
     ) {
-        if self.last_ship.is_none() {
-            self.last_ship = Some(Instant::now());
-        }
-
         let mut versions: Option<HashMap<ChannelID, Option<DataVersion>>> = None;
 
         {
@@ -99,6 +93,24 @@ mod tests {
     use super::*;
     use crate::buffers::synchronizers::tests::{add_data, create_test_buffer};
 
+    fn test_packet_set_contains_version(work_queue: Arc<WorkQueue>, version: u128) {
+        assert!(work_queue
+            .steal()
+            .success()
+            .and_then(|v| {
+                let out: Vec<u128> = v
+                    .packet_data
+                    .values()
+                    .iter()
+                    .map(|p| p.as_ref().unwrap().1.version.timestamp)
+                    .collect();
+                return Some(out);
+            })
+            .unwrap()
+            .iter()
+            .all(|v| *v == version));
+    }
+
     #[test]
     fn test_first_synch_synchronize_returns_all_data() {
         let buffer = create_test_buffer();
@@ -119,7 +131,12 @@ mod tests {
 
         let work_queue = Arc::new(WorkQueue::default());
         test_synch.synchronize(&safe_buffer, work_queue.clone());
-        assert!(work_queue.steal().is_success());
+        test_packet_set_contains_version(work_queue.clone(), 1);
+        assert!(work_queue.steal().is_empty());
+
+        add_data(&safe_buffer, "test2".to_string(), 5);
+        test_synch.synchronize(&safe_buffer, work_queue.clone());
+        test_packet_set_contains_version(work_queue.clone(), 5);
         assert!(work_queue.steal().is_empty());
     }
 }
