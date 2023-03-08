@@ -17,6 +17,8 @@ pub trait FixedSizeBuffer {
 
     fn peek(&self) -> Option<&DataVersion>;
 
+    fn iter(&self) -> Box<BufferIterator>;
+
     fn pop(&mut self) -> Option<UntypedPacket>;
 }
 
@@ -72,11 +74,15 @@ impl FixedSizeBuffer for RtRingBuffer {
     fn pop(&mut self) -> Option<UntypedPacket> {
         self.buffer.dequeue()
     }
+
+    fn iter(&self) -> Box<BufferIterator> {
+        Box::new(self.buffer.iter()) as Box<BufferIterator>
+    }
 }
 
 use std::collections::BTreeMap;
 
-use super::BufferError;
+use super::{BufferError, BufferIterator};
 
 pub struct FixedSizeBTree {
     data: BTreeMap<DataVersion, UntypedPacket>,
@@ -137,6 +143,10 @@ impl FixedSizeBuffer for FixedSizeBTree {
             return Some(value.1);
         }
         None
+    }
+
+    fn iter(&self) -> Box<BufferIterator> {
+        Box::new(self.data.values().clone()) as Box<BufferIterator>
     }
 }
 

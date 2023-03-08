@@ -44,40 +44,49 @@ fn get_min_versions(
 fn get_packets_for_version(
     data_versions: &HashMap<ChannelID, Option<DataVersion>>,
     buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
+    exact_match: bool,
 ) -> Option<PacketSet> {
     let mut buffer_locked = buffer.lock().unwrap();
-    let mut mismatch = false;
+    let mut valid_counter = 0;
+
     let packet_set = data_versions
         .iter()
         .map(|(channel_id, data_version)| {
-            let removed_packet = buffer_locked.pop(channel_id);
-            if removed_packet.is_err() {
-                eprintln!(
-                    "Error while reading data {}",
-                    removed_packet.as_ref().err().unwrap()
-                )
-            }
-            match removed_packet.unwrap() {
-                Some(entry) => {
-                    if data_version.is_none() {
-                        return (channel_id.clone(), None);
-                    }
-                    let data_version = data_version.unwrap();
-                    if entry.version != data_version {
-                        mismatch = true;
-                    }
-                    return (
-                        channel_id.clone(),
-                        Some(((channel_id.clone(), data_version.clone()), entry)),
+            loop {
+                let removed_packet = buffer_locked.pop(channel_id);
+                if removed_packet.is_err() {
+                    eprintln!(
+                        "Error while reading data {}",
+                        removed_packet.as_ref().err().unwrap()
                     );
+                    break;
                 }
-                None => {
-                    return (channel_id.clone(), None);
+                if let Some(entry) = removed_packet.unwrap() {
+                    if let Some(data_version) = data_version {
+                        if entry.version == *data_version {
+                            valid_counter += 1;
+                            return (
+                                channel_id.clone(),
+                                Some(((channel_id.clone(), data_version.clone()), entry)),
+                            );
+                        } else {
+                            if exact_match {
+                                break;
+                            }
+                        }
+                    }
+                    if exact_match {
+                        break;
+                    }
+                } else {
+                    break;
                 }
             }
+            return (channel_id.clone(), None);
         })
         .collect();
-    if mismatch {
+
+    if valid_counter != buffer_locked.available_channels().len() {
         eprintln!(
             "Found mismatched entries when generating packet set for {:?}. Skipping.",
             data_versions

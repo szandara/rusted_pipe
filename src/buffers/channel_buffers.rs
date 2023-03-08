@@ -1,4 +1,5 @@
 use super::BufferError;
+use super::BufferIterator;
 use super::DataBuffer;
 use super::OrderedBuffer;
 use crate::buffers::single_buffers::FixedSizeBuffer;
@@ -120,6 +121,13 @@ impl<T: FixedSizeBuffer> OrderedBuffer for BoundedBufferedData<T> {
             }
         }
         return true;
+    }
+
+    fn iterator(&self, channel: &ChannelID) -> Option<Box<BufferIterator>> {
+        match self.data.get(channel) {
+            Some(channel) => Some(channel.iter()),
+            _ => None,
+        }
     }
 }
 

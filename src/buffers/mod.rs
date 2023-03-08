@@ -1,6 +1,8 @@
 pub mod channel_buffers;
 pub mod single_buffers;
 pub mod synchronizers;
+use std::slice::Iter;
+
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
@@ -36,12 +38,16 @@ pub trait DataBuffer {
     fn create_channel(&mut self, channel: &ChannelID) -> Result<ChannelID, BufferError>;
 }
 
+pub type BufferIterator<'a> = dyn Iterator<Item = &'a UntypedPacket> + 'a;
+
 pub trait OrderedBuffer: DataBuffer {
     fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
 
     fn peek(&self, channel: &ChannelID) -> Option<&DataVersion>;
 
     fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError>;
+
+    fn iterator<'a>(&'a self, channel: &ChannelID) -> Option<Box<BufferIterator>>;
 
     fn are_buffers_empty(&self) -> bool;
 }

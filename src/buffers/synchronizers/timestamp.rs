@@ -16,7 +16,7 @@ impl PacketSynchronizer for TimestampSynchronizer {
         loop {
             if let Some(data_versions) = synchronize(&mut ordered_buffer.clone()) {
                 if let Some(packet_set) =
-                    get_packets_for_version(&data_versions, &mut ordered_buffer.clone())
+                    get_packets_for_version(&data_versions, &mut ordered_buffer.clone(), true)
                 {
                     if packet_set.has_none() {
                         break;
