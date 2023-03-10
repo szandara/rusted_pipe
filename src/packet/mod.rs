@@ -1,8 +1,8 @@
 use std::any::{Any, TypeId};
 use std::marker::Copy;
-use std::mem;
+
 use std::os::raw::c_void;
-use std::str::Bytes;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam::deque::{Injector, Steal};
@@ -89,7 +89,7 @@ impl<T: Clone> Packet<T> {
 }
 
 impl UntypedPacketCast for UntypedPacket {
-    fn deref_owned<T>(mut self) -> Result<Packet<T>, PacketError> {
+    fn deref_owned<T>(self) -> Result<Packet<T>, PacketError> {
         Ok(Packet::<T> {
             data: unsafe { Box::from_raw(*self.data as *mut T) as Box<T> },
             version: self.version,
@@ -139,7 +139,7 @@ impl PacketSet {
     }
 
     pub fn values(&self) -> Vec<&Option<PacketWithAddress>> {
-        self.data.values().into_iter().collect_vec()
+        self.data.values().collect_vec()
     }
 
     pub fn has_none(&self) -> bool {
@@ -148,7 +148,7 @@ impl PacketSet {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     pub fn get<T: 'static>(&self, channel_number: usize) -> Result<PacketView<T>, PacketError> {

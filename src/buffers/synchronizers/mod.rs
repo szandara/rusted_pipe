@@ -36,9 +36,9 @@ fn get_min_versions(
     let mut out_map = HashMap::<String, Option<DataVersion>>::default();
 
     for channel in buffer.available_channels().iter() {
-        out_map.insert(channel.to_string(), buffer.peek(&channel).cloned());
+        out_map.insert(channel.to_string(), buffer.peek(channel).cloned());
     }
-    return out_map;
+    out_map
 }
 
 fn get_packets_for_version(
@@ -68,14 +68,12 @@ fn get_packets_for_version(
                             return (
                                 ChannelID::from(channel_id.as_str()),
                                 Some((
-                                    (ChannelID::from(channel_id.as_str()), data_version.clone()),
+                                    (ChannelID::from(channel_id.as_str()), *data_version),
                                     entry,
                                 )),
                             );
-                        } else {
-                            if exact_match {
-                                break;
-                            }
+                        } else if exact_match {
+                            break;
                         }
                     }
                     if exact_match {
@@ -91,8 +89,7 @@ fn get_packets_for_version(
 
     if valid_counter != buffer_locked.available_channels().len() {
         eprintln!(
-            "Found mismatched entries when generating packet set for {:?}. Skipping.",
-            data_versions
+            "Found mismatched entries when generating packet set for {data_versions:?}. Skipping."
         );
         return None;
     }
@@ -101,10 +98,10 @@ fn get_packets_for_version(
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::buffers::single_buffers::FixedSizeBTree;
-    use crate::channels::{ChannelID, Packet};
-    use crate::DataVersion;
+    
+    
+    
+    
 
     // pub fn create_test_buffer() -> BoundedBufferedData<FixedSizeBTree<String>> {
     //     let mut buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);

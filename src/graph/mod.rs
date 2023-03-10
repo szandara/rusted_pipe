@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
+
 
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::OrderedBuffer;
@@ -18,19 +18,19 @@ use crate::packet::WorkQueue;
 use atomic::Atomic;
 use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
-use crossbeam::channel::Select;
+
 use crossbeam::channel::Sender;
-use futures::io::Write;
+
 
 use crate::packet::PacketSet;
 use downcast_rs::{impl_downcast, Downcast};
 use std::sync::atomic::Ordering;
 
-use super::channels::{untyped_channel, ReadChannel, WriteChannel};
-use crate::packet::ChannelID;
+use super::channels::{ReadChannel, WriteChannel};
+
 
 use super::RustedPipeError;
-use indexmap::IndexMap;
+
 
 type ProcessorSafe = Arc<Mutex<dyn Processor>>;
 impl_downcast!(Processor);
@@ -126,7 +126,7 @@ pub struct Graph {
 pub fn link<U: Clone>(
     read: &mut BufferReceiver<U, dyn FixedSizeBuffer<Data = U>>,
 ) -> Result<(), RustedPipeError> {
-    let (channel_sender, channel_receiver) = typed_channel::<U>();
+    let (_channel_sender, channel_receiver) = typed_channel::<U>();
     read.link(channel_receiver);
     // self.nodes
     //     .get_mut(from_node_id)
@@ -188,11 +188,11 @@ impl Graph {
             }));
         }
 
-        let work_queue_processor = work_queue.clone();
+        let work_queue_processor = work_queue;
         workers.push(ProcessorWorker {
             work_queue: work_queue_processor,
-            processor: handler.clone(),
-            write_channel: arc_write_channel.clone(),
+            processor: handler,
+            write_channel: arc_write_channel,
             status: Arc::new(Atomic::new(WorkerStatus::Idle)),
             is_source,
         });
@@ -301,11 +301,11 @@ fn consume(
                     {
                         Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
                         Err(RustedPipeError::EndOfStream()) => {
-                            println!("Terminating worker {:?}", i);
+                            println!("Terminating worker {i:?}");
                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed)
                         }
                         Err(err) => {
-                            println!("Error in worker {:?}: {:?}", i, err);
+                            println!("Error in worker {i:?}: {err:?}");
                             lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
                         }
                     }

@@ -29,7 +29,7 @@ impl<U, T: FixedSizeBuffer<Data = U> + ?Sized> BufferReceiver<U, T> {
     pub fn try_read(&mut self) -> Result<DataVersion, ChannelError> {
         if let Some(channel) = self.channel.as_ref() {
             let packet = channel.try_receive()?;
-            let version = packet.version.clone();
+            let version = packet.version;
             self.buffer.insert(packet)?;
             return Ok(version);
         }
@@ -158,7 +158,7 @@ impl<T: OrderedBuffer + 'static> ReadChannel<T> {
     ) -> Self {
         ReadChannel {
             synch_strategy,
-            work_queue: work_queue,
+            work_queue,
             channels: Arc::new(Mutex::new(channels)),
         }
     }
@@ -183,7 +183,7 @@ impl<T: OrderedBuffer + 'static> ReadChannel<T> {
                 }
             }
             Err(err) => {
-                eprintln!("Exception while reading {:?}", err);
+                eprintln!("Exception while reading {err:?}");
                 match err {
                     crate::channels::ChannelError::ReceiveError(_) => {
                         eprintln!("Channel is disonnected, closing");
@@ -197,14 +197,14 @@ impl<T: OrderedBuffer + 'static> ReadChannel<T> {
                 }
             }
         }
-        return true;
+        true
     }
 
-    pub fn start(&mut self, work_queue: Arc<WorkQueue>) -> () {
+    pub fn start(&mut self, work_queue: Arc<WorkQueue>) {
         self.work_queue = Some(work_queue);
     }
 
-    pub fn stop(&mut self) -> () {}
+    pub fn stop(&mut self) {}
 }
 
 #[cfg(test)]
@@ -235,7 +235,7 @@ mod tests {
             RtRingBuffer::<String>::new(2, true),
             RtRingBuffer::<String>::new(2, true),
         );
-        let mut read_channel = ReadChannel::new(
+        let read_channel = ReadChannel::new(
             synch_strategy,
             Some(Arc::new(WorkQueue::default())),
             read_channel2,
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_read_channel_try_read_returns_error_when_push_if_not_initialized() {
-        let (mut read_channel, _) = test_read_channel();
+        let (read_channel, _) = test_read_channel();
         assert!(read_channel
             .channels
             .lock()

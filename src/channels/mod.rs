@@ -40,18 +40,18 @@ pub enum ChannelError {
 
 pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     let (channel_sender, channel_receiver) = unbounded::<UntypedPacket>();
-    return (
-        UntypedSenderChannel::new(&channel_sender.clone()),
-        UntypedReceiverChannel::new(&channel_receiver.clone()),
-    );
+    (
+        UntypedSenderChannel::new(&channel_sender),
+        UntypedReceiverChannel::new(&channel_receiver),
+    )
 }
 
 pub fn typed_channel<T>() -> (SenderChannel<T>, ReceiverChannel<T>) {
     let (channel_sender, channel_receiver) = unbounded::<Packet<T>>();
-    return (
+    (
         SenderChannel::new(&channel_sender),
         ReceiverChannel::new(&channel_receiver),
-    );
+    )
 }
 
 #[derive(Debug)]

@@ -25,9 +25,7 @@ impl WriteChannel {
             .get(channel_id)
             .ok_or(ChannelError::MissingChannel(channel_id.clone()))?;
         data_queues
-            .iter()
-            .map(|sender| Ok(sender.send(Packet::<T>::new(data.clone(), version.clone()))?))
-            .collect::<Result<(), ChannelError>>()?;
+            .iter().try_for_each(|sender| sender.send(Packet::<T>::new(data.clone(), *version)))?;
         Ok(())
     }
 

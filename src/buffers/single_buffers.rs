@@ -34,12 +34,12 @@ impl<T> RtRingBuffer<T> {
 
     pub fn new(mut max_size: usize, block_full: bool) -> Self {
         if !max_size.is_power_of_two() {
-            max_size = (2 as usize).pow(max_size.ilog2() / (2 as usize).ilog2() + 1);
+            max_size = 2_usize.pow(max_size.ilog2() / 2_usize.ilog2() + 1);
         }
-        return RtRingBuffer {
+        RtRingBuffer {
             buffer: _RingBuffer::with_capacity(max_size),
             block_full,
-        };
+        }
     }
 }
 
@@ -128,12 +128,12 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
             }
             self.data.pop_first();
         }
-        self.data.insert(packet.version.clone(), packet);
+        self.data.insert(packet.version, packet);
         Ok(())
     }
 
     fn len(&self) -> usize {
-        return self.data.len();
+        self.data.len()
     }
 
     fn peek(&self) -> Option<&DataVersion> {
@@ -151,7 +151,7 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
     }
 
     fn iter(&self) -> Box<BufferIterator<T>> {
-        Box::new(self.data.values().clone()) as Box<BufferIterator<T>>
+        Box::new(self.data.values()) as Box<BufferIterator<T>>
     }
 }
 
@@ -166,22 +166,22 @@ mod fixed_size_buffer_tests {
             paste::item! {
                 #[test]
                 fn [< test_buffer_inserts_and_drops_data_if_past_capacity _ $type >] () {
-                    let mut buffer = $type::new(32, false);
+                    let buffer = $type::new(32, false);
                     test_buffer_inserts_and_drops_data_if_past_capacity::<$type<String>>(buffer);
                 }
                 #[test]
                 fn [< test_buffer_contains_key_returns_expected _ $type >] () {
-                    let mut buffer = $type::new(2, false);
+                    let buffer = $type::new(2, false);
                     test_buffer_contains_key_returns_expected::<$type<String>>(buffer);
                 }
                 #[test]
                 fn [< test_buffer_get_returns_expected_data _ $type >] () {
-                    let mut buffer = $type::new(2, false);
+                    let buffer = $type::new(2, false);
                     test_buffer_get_returns_expected_data::<$type<String>>(buffer);
                 }
                 #[test]
                 fn [< test_buffer_insert_returns_errr_if_full_and_block _ $type >] () {
-                    let mut buffer = $type::new(2, true);
+                    let buffer = $type::new(2, true);
                     test_buffer_insert_returns_errr_if_full_and_block::<$type<String>>(buffer);
                 }
             }

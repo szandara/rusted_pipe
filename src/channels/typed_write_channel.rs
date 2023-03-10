@@ -17,9 +17,7 @@ impl<U: Clone> BufferWriter<U> {
     }
     pub fn write(&self, data: U, version: &DataVersion) -> Result<(), ChannelError> {
         self.channels
-            .iter()
-            .map(|sender| Ok(sender.send(Packet::<U>::new(data.clone(), version.clone()))?))
-            .collect::<Result<(), ChannelError>>()?;
+            .iter().try_for_each(|sender| sender.send(Packet::<U>::new(data.clone(), *version)))?;
         Ok(())
     }
 }
@@ -62,12 +60,12 @@ write_channels!(WriteChannel8, c1, c2, c3, c4, c5, c6, c7, c8);
 #[cfg(test)]
 mod tests {
     use crate::channels::typed_channel;
-    use crate::channels::untyped_channel;
-    use crate::channels::ChannelID;
+    
+    
     use crate::channels::ReceiverChannel;
-    use crate::channels::UntypedReceiverChannel;
-    use crate::channels::WriteChannel;
-    use crate::ChannelError;
+    
+    
+    
     use crate::DataVersion;
 
     use super::WriteChannel3;
@@ -84,7 +82,7 @@ mod tests {
 
     #[test]
     fn test_send_on_existing_channel_fans_out_to_all_receivers() {
-        let (mut write_channel, existing_read_channel) = create_write_channel();
+        let (mut write_channel, _existing_read_channel) = create_write_channel();
 
         let mut read_channels = vec![];
 
