@@ -1,4 +1,5 @@
 pub mod read_channel;
+mod typed_write_channel;
 mod write_channel;
 
 use crossbeam::channel::{unbounded, Receiver, RecvError, Sender, TryRecvError};

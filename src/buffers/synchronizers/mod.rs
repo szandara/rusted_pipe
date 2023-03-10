@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 pub trait PacketSynchronizer: Send {
     fn synchronize(
         &mut self,
-        ordered_buffer: &Arc<Mutex<dyn OrderedBuffer>>,
+        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
         work_queue: Arc<WorkQueue>,
     );
 }

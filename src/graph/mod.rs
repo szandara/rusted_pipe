@@ -10,14 +10,17 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::OrderedBuffer;
-use crate::channels::read_channel::Reader;
+use crate::channels::read_channel::BufferReceiver;
+use crate::channels::typed_channel;
 use crate::packet::WorkQueue;
 use atomic::Atomic;
 use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
 use crossbeam::channel::Select;
 use crossbeam::channel::Sender;
+use futures::io::Write;
 
 use crate::packet::PacketSet;
 use downcast_rs::{impl_downcast, Downcast};
@@ -29,162 +32,217 @@ use crate::packet::ChannelID;
 use super::RustedPipeError;
 use indexmap::IndexMap;
 
-// type ProcessorSafe = Arc<Mutex<dyn Processor>>;
-// impl_downcast!(Processor);
+type ProcessorSafe = Arc<Mutex<dyn Processor>>;
+impl_downcast!(Processor);
 
 // pub fn new_node(processor: impl Processor + 'static, work_queue: WorkQueue) -> Node {
 //     Node::default(Arc::new(Mutex::new(processor)), work_queue)
 // }
 
-// pub struct Graph {
-//     nodes: IndexMap<String, Node>,
-//     running_nodes: HashSet<String>,
-//     running: Arc<Atomic<GraphStatus>>,
-//     node_threads: Vec<JoinHandle<()>>,
-//     read_threads: Vec<JoinHandle<()>>,
-//     worker_done: (Sender<usize>, Receiver<usize>),
-//     reader_empty: (Sender<usize>, Receiver<usize>),
-// }
+/// PROCESSORS
+pub struct Node<READ: OrderedBuffer> {
+    pub id: String,
+    pub write_channel: WriteChannel,
+    pub read_channel: ReadChannel<READ>,
+    pub handler: ProcessorSafe,
+    pub work_queue: WorkQueue,
+}
 
-// impl Graph {
-//     pub fn new() -> Self {
-//         Graph {
-//             nodes: IndexMap::<String, Node>::default(),
-//             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
-//             running_nodes: Default::default(),
-//             node_threads: Vec::<JoinHandle<()>>::default(),
-//             read_threads: Vec::<JoinHandle<()>>::default(),
-//             worker_done: unbounded::<usize>(),
-//             reader_empty: unbounded::<usize>(),
-//         }
-//     }
+impl<READ: OrderedBuffer> fmt::Debug for Node<READ> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.id)
+    }
+}
 
-//     pub fn add_node(&mut self, node: Node) -> Result<(), RustedPipeError> {
-//         let node_id = node.id.clone();
-//         self.nodes.entry(node_id).or_insert(node);
-//         Ok(())
-//     }
+impl<READ: OrderedBuffer> Node<READ> {
+    pub fn default(
+        handler: ProcessorSafe,
+        work_queue: WorkQueue,
+        read_channel: ReadChannel<READ>,
+    ) -> Self {
+        Node {
+            id: handler.lock().unwrap().id().clone(),
+            write_channel: WriteChannel::default(),
+            read_channel,
+            handler: handler.clone(),
+            work_queue,
+        }
+    }
 
-//     pub fn nodes(&self) -> &IndexMap<String, Node> {
-//         return &self.nodes;
-//     }
+    pub fn new(
+        handler: ProcessorSafe,
+        work_queue: WorkQueue,
+        read_channel: ReadChannel<READ>,
+        write_channel: WriteChannel,
+    ) -> Self {
+        Node {
+            id: handler.lock().unwrap().id().clone(),
+            write_channel,
+            read_channel,
+            handler: handler.clone(),
+            work_queue,
+        }
+    }
 
-//     pub fn link(
-//         &mut self,
-//         from_node_id: &String,
-//         from_port: &ChannelID,
-//         to_node_id: &String,
-//         to_port: &ChannelID,
-//     ) -> Result<(), RustedPipeError> {
-//         let (channel_sender, channel_receiver) = untyped_channel();
+    fn start(
+        self,
+    ) -> (
+        String,
+        WriteChannel,
+        ReadChannel<READ>,
+        ProcessorSafe,
+        WorkQueue,
+    ) {
+        (
+            self.id,
+            self.write_channel,
+            self.read_channel,
+            self.handler,
+            self.work_queue,
+        )
+    }
+}
 
-//         self.nodes
-//             .get_mut(from_node_id)
-//             .ok_or(RustedPipeError::MissingNodeError(from_node_id.clone()))?
-//             .write_channel
-//             .add_channel(from_port, channel_sender);
+pub trait Processor: Sync + Send + Downcast {
+    fn handle(
+        &mut self,
+        input: PacketSet,
+        output: Arc<Mutex<WriteChannel>>,
+    ) -> Result<(), RustedPipeError>;
 
-//         let receiver_node = self
-//             .nodes
-//             .get_mut(to_node_id)
-//             .ok_or(RustedPipeError::MissingNodeError(to_node_id.clone()))?;
+    fn id(&self) -> &String;
+}
 
-//         receiver_node
-//             .read_channel
-//             .add_channel(to_port, channel_receiver)
-//             .unwrap();
+pub struct Graph {
+    //nodes: IndexMap<String, Node>,
+    running_nodes: HashSet<String>,
+    running: Arc<Atomic<GraphStatus>>,
+    node_threads: Vec<JoinHandle<()>>,
+    read_threads: Vec<JoinHandle<()>>,
+    worker_done: (Sender<usize>, Receiver<usize>),
+    reader_empty: (Sender<String>, Receiver<String>),
+}
 
-//         Ok(())
-//     }
+pub fn link<U: Clone>(
+    read: &mut BufferReceiver<U, dyn FixedSizeBuffer<Data = U>>,
+) -> Result<(), RustedPipeError> {
+    let (channel_sender, channel_receiver) = typed_channel::<U>();
+    read.link(channel_receiver);
+    // self.nodes
+    //     .get_mut(from_node_id)
+    //     .ok_or(RustedPipeError::MissingNodeError(from_node_id.clone()))?
+    //     .write_channel
+    //     .add_channel(from_port, channel_sender);
 
-//     pub fn start(&mut self) {
-//         let mut node_id = 0;
-//         let mut workers = Vec::default();
-//         self.running.swap(GraphStatus::Running, Ordering::Relaxed);
+    // let receiver_node = self
+    //     .nodes
+    //     .get_mut(to_node_id)
+    //     .ok_or(RustedPipeError::MissingNodeError(to_node_id.clone()))?;
 
-//         while !self.nodes.is_empty() {
-//             let processor = self.nodes.pop().unwrap();
-//             self.running_nodes.insert(processor.0.clone());
-//             let (_id, write_channel, mut read_channel, handler, work_queue) = processor.1.start();
+    // receiver_node
+    //     .read_channel
+    //     .add_channel(to_port, channel_receiver)
+    //     .unwrap();
 
-//             let assigned_node_id = node_id;
-//             let work_queue = Arc::new(work_queue);
-//             let arc_write_channel = Arc::new(Mutex::new(write_channel));
-//             let reading_running_thread = self.running.clone();
-//             let is_source = read_channel.available_channels().len() == 0;
+    Ok(())
+}
 
-//             read_channel.start(assigned_node_id, work_queue.clone());
-//             if !is_source {
-//                 let done_channel = self.reader_empty.0.clone();
-//                 self.read_threads.push(thread::spawn(move || {
-//                     read_channel_data(
-//                         assigned_node_id,
-//                         reading_running_thread,
-//                         read_channel,
-//                         done_channel,
-//                     )
-//                 }));
-//             }
+impl Graph {
+    pub fn new() -> Self {
+        Graph {
+            //nodes: IndexMap::<String, Node>::default(),
+            running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
+            running_nodes: Default::default(),
+            node_threads: Vec::<JoinHandle<()>>::default(),
+            read_threads: Vec::<JoinHandle<()>>::default(),
+            worker_done: unbounded::<usize>(),
+            reader_empty: unbounded::<String>(),
+        }
+    }
 
-//             let work_queue_processor = work_queue.clone();
-//             workers.push(ProcessorWorker {
-//                 work_queue: work_queue_processor,
-//                 processor: handler.clone(),
-//                 write_channel: arc_write_channel.clone(),
-//                 status: Arc::new(Atomic::new(WorkerStatus::Idle)),
-//                 is_source,
-//             });
+    // pub fn add_node(&mut self, node: Node) -> Result<(), RustedPipeError> {
+    //     let node_id = node.id.clone();
+    //     self.nodes.entry(node_id).or_insert(node);
+    //     Ok(())
+    // }
 
-//             node_id += 1;
-//         }
+    // pub fn nodes(&self) -> &IndexMap<String, Node> {
+    //     return &self.nodes;
+    // }
 
-//         let consume_running_thread = self.running.clone();
-//         let done_channel = self.worker_done.0.clone();
-//         self.node_threads.push(thread::spawn(move || {
-//             consume(consume_running_thread, workers, done_channel)
-//         }));
-//     }
+    pub fn start<READ: OrderedBuffer + 'static>(&mut self, processor: Node<READ>) {
+        let mut workers = Vec::default();
+        self.running.swap(GraphStatus::Running, Ordering::Relaxed);
+        let (id, write_channel, mut read_channel, handler, work_queue) = processor.start();
 
-//     pub fn stop(&mut self, wait_for_data: bool) {
-//         let mut empty_set = HashSet::new();
+        let work_queue = Arc::new(work_queue);
+        let arc_write_channel = Arc::new(Mutex::new(write_channel));
+        let reading_running_thread = self.running.clone();
+        let is_source = false;
 
-//         if wait_for_data {
-//             // Wait for all buffers to be empty
-//             self.running
-//                 .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
+        read_channel.start(work_queue.clone());
+        if !is_source {
+            let done_channel = self.reader_empty.0.clone();
+            self.read_threads.push(thread::spawn(move || {
+                read_channel_data(id, reading_running_thread, read_channel, done_channel)
+            }));
+        }
 
-//             while empty_set.len() != self.running_nodes.len() {
-//                 let done = self.worker_done.1.recv().unwrap();
-//                 empty_set.insert(done);
-//             }
+        let work_queue_processor = work_queue.clone();
+        workers.push(ProcessorWorker {
+            work_queue: work_queue_processor,
+            processor: handler.clone(),
+            write_channel: arc_write_channel.clone(),
+            status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+            is_source,
+        });
 
-//             empty_set.clear();
-//             while empty_set.len() != self.read_threads.len() {
-//                 let done = self.reader_empty.1.recv().unwrap();
-//                 empty_set.insert(done);
-//             }
-//         }
-//         self.running
-//             .swap(GraphStatus::Terminating, Ordering::Relaxed);
+        let consume_running_thread = self.running.clone();
+        let done_channel = self.worker_done.0.clone();
+        self.node_threads.push(thread::spawn(move || {
+            consume(consume_running_thread, workers, done_channel)
+        }));
+    }
 
-//         for n in 0..self.node_threads.len() {
-//             self.node_threads.remove(n).join().unwrap();
-//         }
-//         for n in 0..self.read_threads.len() {
-//             if n < self.read_threads.len() {
-//                 self.read_threads.remove(n).join().unwrap();
-//             }
-//         }
-//     }
-// }
+    pub fn stop(&mut self, wait_for_data: bool) {
+        let mut empty_set = HashSet::new();
+        let mut empty_receiver_set = HashSet::new();
+        if wait_for_data {
+            // Wait for all buffers to be empty
+            self.running
+                .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
 
-// struct ProcessorWorker {
-//     work_queue: Arc<WorkQueue>,
-//     processor: ProcessorSafe,
-//     write_channel: Arc<Mutex<WriteChannel>>,
-//     status: Arc<Atomic<WorkerStatus>>,
-//     is_source: bool,
-// }
+            while empty_set.len() != self.running_nodes.len() {
+                let done = self.worker_done.1.recv().unwrap();
+                empty_set.insert(done);
+            }
+
+            while empty_receiver_set.len() != self.read_threads.len() {
+                let done = self.reader_empty.1.recv().unwrap();
+                empty_receiver_set.insert(done);
+            }
+        }
+        self.running
+            .swap(GraphStatus::Terminating, Ordering::Relaxed);
+
+        for n in 0..self.node_threads.len() {
+            self.node_threads.remove(n).join().unwrap();
+        }
+        for n in 0..self.read_threads.len() {
+            if n < self.read_threads.len() {
+                self.read_threads.remove(n).join().unwrap();
+            }
+        }
+    }
+}
+
+struct ProcessorWorker {
+    work_queue: Arc<WorkQueue>,
+    processor: ProcessorSafe,
+    write_channel: Arc<Mutex<WriteChannel>>,
+    status: Arc<Atomic<WorkerStatus>>,
+    is_source: bool,
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum GraphStatus {
@@ -193,172 +251,90 @@ enum GraphStatus {
     WaitingForDataToTerminate = 2,
 }
 
-// #[derive(Clone, Copy, PartialEq)]
-// enum WorkerStatus {
-//     Idle = 0,
-//     Running = 1,
-//     Terminating = 2,
-// }
+#[derive(Clone, Copy, PartialEq)]
+enum WorkerStatus {
+    Idle = 0,
+    Running = 1,
+    Terminating = 2,
+}
 
-// fn consume(
-//     running: Arc<Atomic<GraphStatus>>,
-//     workers: Vec<ProcessorWorker>,
-//     done_notification: Sender<usize>,
-// ) {
-//     let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
-//     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
-//         let mut terminated = 0;
-//         for (i, worker) in workers.iter().enumerate() {
-//             if worker.status.load(Ordering::Relaxed) == WorkerStatus::Terminating {
-//                 terminated += 1;
-//                 if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
-//                     done_notification.send(i).unwrap();
-//                 }
-//             } else if worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
-//                 let lock_status = worker.status.clone();
-//                 let arc_write_channel = worker.write_channel.clone();
-//                 let worker_clone = worker.processor.clone();
-//                 let mut packet = PacketSet::default();
-//                 if !worker.is_source {
-//                     let task = worker.work_queue.steal();
-//                     if let Some(read_event) = task.success() {
-//                         packet = read_event.packet_data;
-//                     } else {
-//                         if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate
-//                         {
-//                             done_notification.send(i).unwrap();
-//                         }
-//                         continue;
-//                     }
-//                 }
-
-//                 worker
-//                     .status
-//                     .store(WorkerStatus::Running, Ordering::Relaxed);
-//                 let future = async move {
-//                     match worker_clone
-//                         .lock()
-//                         .unwrap()
-//                         .handle(packet, arc_write_channel)
-//                     {
-//                         Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
-//                         Err(RustedPipeError::EndOfStream()) => {
-//                             println!("Terminating worker {:?}", i);
-//                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed)
-//                         }
-//                         Err(err) => {
-//                             println!("Error in worker {:?}: {:?}", i, err);
-//                             lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
-//                         }
-//                     }
-//                 };
-
-//                 thread_pool.spawn_ok(future);
-//             }
-//         }
-
-//         if terminated == workers.len() {
-//             println!("All workers are terminated");
-//             break;
-//         }
-//     }
-// }
-
-fn read_channel_data<T>(
-    id: usize,
+fn consume(
     running: Arc<Atomic<GraphStatus>>,
-    mut read_channel: ReadChannel<T>,
+    workers: Vec<ProcessorWorker>,
     done_notification: Sender<usize>,
-) where
-    T: Reader + OrderedBuffer,
-{
+) {
+    let thread_pool = futures::executor::ThreadPool::new().expect("Failed to build pool");
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
-        match read_channel
-            .channels
-            .try_receive(Duration::from_millis(100))
-        {
-            Ok(_) => (),
-            Err(err) => {
-                eprintln!("Exception while reading {:?}", err);
-                match err {
-                    crate::channels::ChannelError::ReceiveError(_) => {
-                        eprintln!("Channel is disonnected, closing");
-                        break;
-                    }
-                    _ => {
-                        if read_channel.channels.are_buffers_empty() {
-                            done_notification.send(id).unwrap();
+        let mut terminated = 0;
+        for (i, worker) in workers.iter().enumerate() {
+            if worker.status.load(Ordering::Relaxed) == WorkerStatus::Terminating {
+                terminated += 1;
+                if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
+                    done_notification.send(i).unwrap();
+                }
+            } else if worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
+                let lock_status = worker.status.clone();
+                let arc_write_channel = worker.write_channel.clone();
+                let worker_clone = worker.processor.clone();
+                let mut packet = PacketSet::default();
+                if !worker.is_source {
+                    let task = worker.work_queue.steal();
+                    if let Some(read_event) = task.success() {
+                        packet = read_event.packet_data;
+                    } else {
+                        if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate
+                        {
+                            done_notification.send(i).unwrap();
                         }
                         continue;
                     }
                 }
+
+                worker
+                    .status
+                    .store(WorkerStatus::Running, Ordering::Relaxed);
+                let future = async move {
+                    match worker_clone
+                        .lock()
+                        .unwrap()
+                        .handle(packet, arc_write_channel)
+                    {
+                        Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
+                        Err(RustedPipeError::EndOfStream()) => {
+                            println!("Terminating worker {:?}", i);
+                            lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed)
+                        }
+                        Err(err) => {
+                            println!("Error in worker {:?}: {:?}", i, err);
+                            lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
+                        }
+                    }
+                };
+
+                thread_pool.spawn_ok(future);
             }
         }
+
+        if terminated == workers.len() {
+            println!("All workers are terminated");
+            break;
+        }
+    }
+}
+
+fn read_channel_data<T>(
+    id: String,
+    running: Arc<Atomic<GraphStatus>>,
+    mut read_channel: ReadChannel<T>,
+    done_notification: Sender<String>,
+) where
+    T: OrderedBuffer + 'static,
+{
+    while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
+        read_channel.read(id.to_string(), done_notification.clone());
     }
     read_channel.stop();
 }
-
-// /// PROCESSORS
-// pub struct Node {
-//     pub id: String,
-//     pub write_channel: WriteChannel,
-//     pub read_channel: ReadChannel,
-//     pub handler: ProcessorSafe,
-//     pub work_queue: WorkQueue,
-// }
-
-// impl fmt::Debug for Node {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         write!(f, "{:?}", self.id)
-//     }
-// }
-
-// impl Node {
-//     pub fn default(handler: ProcessorSafe, work_queue: WorkQueue) -> Self {
-//         Node {
-//             id: handler.lock().unwrap().id().clone(),
-//             write_channel: WriteChannel::default(),
-//             read_channel: ReadChannel::default(),
-//             handler: handler.clone(),
-//             work_queue,
-//         }
-//     }
-
-//     pub fn new(
-//         handler: ProcessorSafe,
-//         work_queue: WorkQueue,
-//         read_channel: ReadChannel,
-//         write_channel: WriteChannel,
-//     ) -> Self {
-//         Node {
-//             id: handler.lock().unwrap().id().clone(),
-//             write_channel,
-//             read_channel,
-//             handler: handler.clone(),
-//             work_queue,
-//         }
-//     }
-
-//     fn start(self) -> (String, WriteChannel, ReadChannel, ProcessorSafe, WorkQueue) {
-//         (
-//             self.id,
-//             self.write_channel,
-//             self.read_channel,
-//             self.handler,
-//             self.work_queue,
-//         )
-//     }
-// }
-
-// pub trait Processor: Sync + Send + Downcast {
-//     fn handle(
-//         &mut self,
-//         input: PacketSet,
-//         output: Arc<Mutex<WriteChannel>>,
-//     ) -> Result<(), RustedPipeError>;
-
-//     fn id(&self) -> &String;
-// }
 
 // #[cfg(test)]
 // mod tests {

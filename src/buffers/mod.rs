@@ -2,6 +2,9 @@ pub mod channel_buffers;
 pub mod single_buffers;
 pub mod synchronizers;
 
+use std::time::Duration;
+
+use crate::channels::ChannelError;
 use crate::channels::Packet;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
@@ -43,4 +46,6 @@ pub trait OrderedBuffer {
     //fn iterator<'a, T>(&'a self, channel: &ChannelID) -> Option<Box<BufferIterator<T>>>;
 
     fn are_buffers_empty(&self) -> bool;
+
+    fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
 }
