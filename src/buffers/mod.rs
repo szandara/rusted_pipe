@@ -10,6 +10,7 @@ use thiserror::Error;
 
 pub type PacketBufferAddress = (ChannelID, DataVersion);
 pub type PacketWithAddress = (PacketBufferAddress, UntypedPacket);
+pub type TypedPacketWithAddress<T> = (PacketBufferAddress, Packet<T>);
 
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum BufferError {
@@ -25,30 +26,21 @@ pub enum BufferError {
 pub type BufferIterator<'a, T> = dyn Iterator<Item = &'a Packet<T>> + 'a;
 
 pub trait OrderedBuffer {
-    fn insert(
+    fn get(
         &mut self,
-        channel: &ChannelID,
-        packet: UntypedPacket,
-    ) -> Result<PacketBufferAddress, BufferError>;
+        channel: &str,
+        version: &DataVersion,
+    ) -> Result<Option<UntypedPacket>, BufferError>;
 
-    fn get(&mut self, version: &PacketBufferAddress)
-        -> Result<Option<&UntypedPacket>, BufferError>;
+    fn available_channels(&self) -> Vec<&str>;
 
-    fn available_channels(&self) -> Vec<ChannelID>;
+    fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
 
-    fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
+    fn peek(&self, channel: &str) -> Option<&DataVersion>;
 
-    fn peek(&self, channel: &ChannelID) -> Option<&DataVersion>;
-
-    fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError>;
+    fn pop(&mut self, channel: &str) -> Result<Option<UntypedPacket>, BufferError>;
 
     //fn iterator<'a, T>(&'a self, channel: &ChannelID) -> Option<Box<BufferIterator<T>>>;
 
     fn are_buffers_empty(&self) -> bool;
-}
-
-pub trait OrderedBufferTrait {
-    type Data;
-
-    fn pop<Data>(&mut self) -> Result<Option<Self::Data>, BufferError>;
 }

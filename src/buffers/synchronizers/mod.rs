@@ -20,7 +20,7 @@ pub trait PacketSynchronizer: Send {
 
 fn synchronize(
     ordered_buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
+) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
     let version = min_version.values().next().unwrap();
     if min_version.values().all(|v| v.is_some()) && min_version.values().all(|v| v == version) {
@@ -31,18 +31,18 @@ fn synchronize(
 
 fn get_min_versions(
     buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-) -> HashMap<ChannelID, Option<DataVersion>> {
+) -> HashMap<String, Option<DataVersion>> {
     let buffer = buffer.lock().unwrap();
-    let mut out_map = HashMap::<ChannelID, Option<DataVersion>>::default();
+    let mut out_map = HashMap::<String, Option<DataVersion>>::default();
 
     for channel in buffer.available_channels().iter() {
-        out_map.insert(channel.clone(), buffer.peek(&channel).cloned());
+        out_map.insert(channel.to_string(), buffer.peek(&channel).cloned());
     }
     return out_map;
 }
 
 fn get_packets_for_version(
-    data_versions: &HashMap<ChannelID, Option<DataVersion>>,
+    data_versions: &HashMap<String, Option<DataVersion>>,
     buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
     exact_match: bool,
 ) -> Option<PacketSet> {
@@ -66,8 +66,11 @@ fn get_packets_for_version(
                         if entry.version == *data_version {
                             valid_counter += 1;
                             return (
-                                channel_id.clone(),
-                                Some(((channel_id.clone(), data_version.clone()), entry)),
+                                ChannelID::from(channel_id.as_str()),
+                                Some((
+                                    (ChannelID::from(channel_id.as_str()), data_version.clone()),
+                                    entry,
+                                )),
                             );
                         } else {
                             if exact_match {
@@ -82,7 +85,7 @@ fn get_packets_for_version(
                     break;
                 }
             }
-            return (channel_id.clone(), None);
+            return (ChannelID::from(channel_id.as_str()), None);
         })
         .collect();
 

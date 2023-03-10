@@ -1,5 +1,8 @@
 use std::any::{Any, TypeId};
 use std::marker::Copy;
+use std::mem;
+use std::os::raw::c_void;
+use std::str::Bytes;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam::deque::{Injector, Steal};
@@ -52,20 +55,20 @@ pub struct PacketBase<T> {
 
 pub type Packet<T> = PacketBase<Box<T>>;
 pub type PacketView<'a, T> = PacketBase<&'a T>;
-pub type UntypedPacket = Packet<dyn Any>;
+pub type UntypedPacket = Packet<*const c_void>;
 
-unsafe impl Sync for Packet<dyn Any + 'static> {}
-unsafe impl Send for Packet<dyn Any + 'static> {}
+unsafe impl Sync for Packet<dyn Any> {}
+unsafe impl Send for Packet<dyn Any> {}
 
-pub trait UntypedPacketCast: 'static {
-    fn deref_owned<T: 'static>(self) -> Result<Packet<T>, PacketError>;
-    fn deref<T: 'static>(&self) -> Result<PacketView<T>, PacketError>;
+pub trait UntypedPacketCast {
+    fn deref_owned<T>(self) -> Result<Packet<T>, PacketError>;
+    fn deref<T>(&self) -> Result<PacketView<T>, PacketError>;
 }
 
-impl<T: 'static> Packet<T> {
+impl<T: Clone> Packet<T> {
     pub fn to_untyped(self) -> UntypedPacket {
         UntypedPacket {
-            data: self.data as Box<dyn Any>,
+            data: Box::new(Box::into_raw(Box::new(self.data)) as *const c_void),
             version: self.version,
         }
     }
@@ -86,27 +89,36 @@ impl<T: 'static> Packet<T> {
 }
 
 impl UntypedPacketCast for UntypedPacket {
-    fn deref_owned<T: 'static>(mut self) -> Result<Packet<T>, PacketError> {
-        match self.data.downcast::<T>() {
-            Ok(casted_type) => Ok(Packet::<T> {
-                data: casted_type,
-                version: self.version,
-            }),
-            Err(untyped_box) => {
-                self.data = untyped_box;
-                Err(PacketError::UnexpectedDataType(TypeId::of::<T>()))
-            }
-        }
+    fn deref_owned<T>(mut self) -> Result<Packet<T>, PacketError> {
+        Ok(Packet::<T> {
+            data: unsafe { Box::from_raw(*self.data as *mut T) as Box<T> },
+            version: self.version,
+        })
+
+        // match self.data.downcast_ref::<T>() {
+        //     Ok(casted_type) => Ok(Packet::<T> {
+        //         data: casted_type,
+        //         version: self.version,
+        //     }),
+        //     Err(untyped_box) => {
+        //         self.data = untyped_box;
+        //         Err(PacketError::UnexpectedDataType(TypeId::of::<T>()))
+        //     }
+        // }
     }
 
-    fn deref<T: 'static>(&self) -> Result<PacketView<T>, PacketError> {
-        let data_ref = self
-            .data
-            .as_ref()
-            .downcast_ref::<T>()
-            .ok_or(PacketError::UnexpectedDataType(TypeId::of::<T>()))?;
+    fn deref<T>(&self) -> Result<PacketView<T>, PacketError> {
+        // let data_ref = self
+        //     .data
+        //     .as_ref()
+        //     .downcast_ref::<T>()
+        //     .ok_or(PacketError::UnexpectedDataType(TypeId::of::<T>()))?;
+        // Ok(PacketView::<T> {
+        //     data: data_ref,
+        //     version: self.version,
+        // })
         Ok(PacketView::<T> {
-            data: data_ref,
+            data: unsafe { &*(*self.data as *const T) },
             version: self.version,
         })
     }

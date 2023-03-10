@@ -10,6 +10,8 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crate::buffers::OrderedBuffer;
+use crate::channels::read_channel::Reader;
 use crate::packet::WorkQueue;
 use atomic::Atomic;
 use crossbeam::channel::unbounded;
@@ -184,12 +186,12 @@ use indexmap::IndexMap;
 //     is_source: bool,
 // }
 
-// #[derive(Clone, Copy, PartialEq)]
-// enum GraphStatus {
-//     Running = 0,
-//     Terminating = 1,
-//     WaitingForDataToTerminate = 2,
-// }
+#[derive(Clone, Copy, PartialEq)]
+enum GraphStatus {
+    Running = 0,
+    Terminating = 1,
+    WaitingForDataToTerminate = 2,
+}
 
 // #[derive(Clone, Copy, PartialEq)]
 // enum WorkerStatus {
@@ -262,50 +264,39 @@ use indexmap::IndexMap;
 //     }
 // }
 
-// fn read_channel_data(
-//     id: usize,
-//     running: Arc<Atomic<GraphStatus>>,
-//     mut read_channel: ReadChannel,
-//     done_notification: Sender<usize>,
-// ) {
-//     let max_range = read_channel.available_channels().len();
-
-//     if max_range == 0 {
-//         return;
-//     }
-
-//     let channels = read_channel.selector();
-//     let mut selector = Select::new();
-//     for channel in &channels {
-//         selector.recv(channel);
-//     }
-
-//     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
-//         let channel_index = selector.ready_timeout(Duration::from_millis(100));
-//         if channel_index.is_err() {
-//             if read_channel.are_buffers_empty() {
-//                 done_notification.send(id).unwrap();
-//             }
-//             continue;
-//         }
-//         match read_channel.try_read_index(channel_index.unwrap()) {
-//             Ok(_) => (),
-//             Err(err) => {
-//                 eprintln!("Exception while reading {:?}", err);
-//                 match err {
-//                     crate::channels::ChannelError::ReceiveError(err) => {
-//                         if err.is_disconnected() {
-//                             eprintln!("Channel is disonnected, closing");
-//                             break;
-//                         }
-//                     }
-//                     _ => {}
-//                 }
-//             }
-//         }
-//     }
-//     read_channel.stop();
-// }
+fn read_channel_data<T>(
+    id: usize,
+    running: Arc<Atomic<GraphStatus>>,
+    mut read_channel: ReadChannel<T>,
+    done_notification: Sender<usize>,
+) where
+    T: Reader + OrderedBuffer,
+{
+    while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
+        match read_channel
+            .channels
+            .try_receive(Duration::from_millis(100))
+        {
+            Ok(_) => (),
+            Err(err) => {
+                eprintln!("Exception while reading {:?}", err);
+                match err {
+                    crate::channels::ChannelError::ReceiveError(_) => {
+                        eprintln!("Channel is disonnected, closing");
+                        break;
+                    }
+                    _ => {
+                        if read_channel.channels.are_buffers_empty() {
+                            done_notification.send(id).unwrap();
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+    read_channel.stop();
+}
 
 // /// PROCESSORS
 // pub struct Node {

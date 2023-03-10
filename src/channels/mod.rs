@@ -1,7 +1,7 @@
-mod read_channel;
+pub mod read_channel;
 mod write_channel;
 
-use crossbeam::channel::{unbounded, Receiver, Sender, TryRecvError};
+use crossbeam::channel::{unbounded, Receiver, RecvError, Sender, TryRecvError};
 
 use crate::buffers::BufferError;
 pub use crate::packet::{
@@ -22,7 +22,9 @@ pub enum ChannelError {
     #[error("Channel has no data {0:?}")]
     MissingChannelData(usize),
     #[error(transparent)]
-    ReceiveError(#[from] TryRecvError),
+    TryReceiveError(#[from] TryRecvError),
+    #[error(transparent)]
+    ReceiveError(#[from] RecvError),
     #[error("Error while sending data {0}")]
     SendError(String),
     #[error(transparent)]
@@ -43,6 +45,14 @@ pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     );
 }
 
+pub fn typed_channel<T>() -> (SenderChannel<T>, ReceiverChannel<T>) {
+    let (channel_sender, channel_receiver) = unbounded::<Packet<T>>();
+    return (
+        SenderChannel::new(&channel_sender),
+        ReceiverChannel::new(&channel_receiver),
+    );
+}
+
 #[derive(Debug)]
 pub struct UntypedReceiverChannel {
     receiver: Receiver<UntypedPacket>,
@@ -57,7 +67,26 @@ impl UntypedReceiverChannel {
     pub fn try_receive(&self) -> Result<UntypedPacket, ChannelError> {
         match self.receiver.try_recv() {
             Ok(packet) => Ok(packet),
-            Err(error) => Err(ChannelError::ReceiveError(error)),
+            Err(error) => Err(ChannelError::TryReceiveError(error)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ReceiverChannel<T> {
+    pub receiver: Receiver<Packet<T>>,
+}
+
+impl<T> ReceiverChannel<T> {
+    pub fn new(receiver: &Receiver<Packet<T>>) -> Self {
+        Self {
+            receiver: receiver.clone(),
+        }
+    }
+    pub fn try_receive(&self) -> Result<Packet<T>, ChannelError> {
+        match self.receiver.try_recv() {
+            Ok(packet) => Ok(packet),
+            Err(error) => Err(ChannelError::TryReceiveError(error)),
         }
     }
 }
@@ -73,8 +102,29 @@ impl UntypedSenderChannel {
             sender: sender.clone() as Sender<UntypedPacket>,
         }
     }
-    pub fn send<T: 'static>(&self, data: Packet<T>) -> Result<(), ChannelError> {
+    pub fn send<T: Clone>(&self, data: Packet<T>) -> Result<(), ChannelError> {
         match self.sender.send(data.to_untyped()) {
+            Ok(res) => Ok(res),
+            Err(_err) => Err(ChannelError::SendError(
+                "Could not send because the channel is disconnected".to_string(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SenderChannel<T> {
+    sender: Sender<Packet<T>>,
+}
+
+impl<T> SenderChannel<T> {
+    pub fn new(sender: &Sender<Packet<T>>) -> Self {
+        Self {
+            sender: sender.clone(),
+        }
+    }
+    pub fn send(&self, data: Packet<T>) -> Result<(), ChannelError> {
+        match self.sender.send(data) {
             Ok(res) => Ok(res),
             Err(_err) => Err(ChannelError::SendError(
                 "Could not send because the channel is disconnected".to_string(),
