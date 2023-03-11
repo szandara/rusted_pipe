@@ -48,20 +48,14 @@ unsafe impl<T: OrderedBuffer> Send for ReadChannel<T> {}
 
 macro_rules! read_channels {
     ($struct_name:ident, $($T:ident),+) => {
-        paste::item! {
-            enum [<$struct_name Channels>] {
-                $(
-                    $T,
-                )+
-            }
-        }
-
-        struct $struct_name<$($T: Clone),+> {
+        #[allow(non_camel_case_types)]
+        pub struct $struct_name<$($T: Clone),+> {
             $(
                 $T: BufferReceiver<$T, RtRingBuffer<$T>>,
             )+
         }
 
+        #[allow(non_camel_case_types)]
         impl<$($T: Clone),+> OrderedBuffer for $struct_name<$($T),+> {
             fn get(&mut self, channel: &str, version: &DataVersion) -> Result<Option<UntypedPacket>, BufferError> {
                 $(
@@ -98,7 +92,11 @@ macro_rules! read_channels {
             fn pop(&mut self, channel: &str) -> Result<Option<UntypedPacket>, BufferError> {
                 $(
                     if channel == stringify!($T) {
-                        return Ok(Some(self.$T.buffer.pop().unwrap().clone().to_untyped()));
+                        if let Some(data) = self.$T.buffer.pop() {
+                            return Ok(Some(data.to_untyped()));
+                        }
+
+                        return Ok(None);
                     }
                 )+
                 Ok(None)
@@ -113,7 +111,11 @@ macro_rules! read_channels {
             fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>{
                 let has_data = select! {
                     $(
-                        recv(self.$T.channel.as_ref().unwrap().receiver) -> msg => {Some(self.$T.buffer.insert(msg?))},
+                        recv(self.$T.channel
+                            .as_ref()
+                            .expect(&format!("Channel not connected {} {}",
+                                stringify!($struct_name), stringify!($T))).receiver) -> msg =>
+                                    {Some(self.$T.buffer.insert(msg?))},
                     )+
                     default(timeout) => None,
                 };
@@ -121,8 +123,9 @@ macro_rules! read_channels {
             }
         }
 
+        #[allow(non_camel_case_types, dead_code)]
         impl<$($T: Clone),+> $struct_name<$($T),+> {
-            fn new($($T: RtRingBuffer<$T>),+) -> Self {
+            pub fn create($($T: RtRingBuffer<$T>),+) -> Self {
                 Self {
                     $(
                         $T: BufferReceiver {buffer: Box::new($T), channel: None},
@@ -131,7 +134,7 @@ macro_rules! read_channels {
             }
 
             $(
-                fn $T(&mut self) -> &mut BufferReceiver<$T, RtRingBuffer<$T>> {
+                pub fn $T(&mut self) -> &mut BufferReceiver<$T, RtRingBuffer<$T>> {
                     &mut self.$T
                 }
             )+
@@ -186,10 +189,14 @@ impl<T: OrderedBuffer + 'static> ReadChannel<T> {
                 eprintln!("Exception while reading {err:?}");
                 match err {
                     crate::channels::ChannelError::ReceiveError(_) => {
+                        if self.channels.lock().unwrap().are_buffers_empty() {
+                            done_notification.send(channel_id).unwrap();
+                        }
                         eprintln!("Channel is disonnected, closing");
                         return false;
                     }
                     _ => {
+                        eprintln!("Sending done {channel_id}");
                         if self.channels.lock().unwrap().are_buffers_empty() {
                             done_notification.send(channel_id).unwrap();
                         }
@@ -231,7 +238,7 @@ mod tests {
         SenderChannel<String>,
     ) {
         let synch_strategy = Box::new(TimestampSynchronizer::default());
-        let read_channel2 = ReadChannel2::new(
+        let read_channel2 = ReadChannel2::create(
             RtRingBuffer::<String>::new(2, true),
             RtRingBuffer::<String>::new(2, true),
         );
@@ -296,11 +303,8 @@ mod tests {
 
     #[test]
     fn test_read_channel_try_read_returns_error_when_buffer_is_full() {
-        // let buffered_data = Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
-        //     2, true,
-        // )));
         let synch_strategy = Box::new(TimestampSynchronizer::default());
-        let read_channel2 = ReadChannel2::new(
+        let read_channel2 = ReadChannel2::create(
             RtRingBuffer::<String>::new(2, true),
             RtRingBuffer::<String>::new(2, true),
         );

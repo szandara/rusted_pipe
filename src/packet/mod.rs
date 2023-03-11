@@ -68,7 +68,7 @@ pub trait UntypedPacketCast {
 impl<T: Clone> Packet<T> {
     pub fn to_untyped(self) -> UntypedPacket {
         UntypedPacket {
-            data: Box::new(Box::into_raw(Box::new(self.data)) as *const c_void),
+            data: Box::new(Box::into_raw(self.data) as *const c_void),
             version: self.version,
         }
     }

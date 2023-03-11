@@ -49,3 +49,34 @@ pub trait OrderedBuffer {
 
     fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
 }
+
+pub struct NoBuffer {}
+impl OrderedBuffer for NoBuffer {
+    fn get(&mut self, _: &str, _: &DataVersion) -> Result<Option<UntypedPacket>, BufferError> {
+        todo!()
+    }
+
+    fn available_channels(&self) -> Vec<&str> {
+        todo!()
+    }
+
+    fn has_version(&self, _: &str, _: &DataVersion) -> bool {
+        todo!()
+    }
+
+    fn peek(&self, _: &str) -> Option<&DataVersion> {
+        todo!()
+    }
+
+    fn pop(&mut self, _: &str) -> Result<Option<UntypedPacket>, BufferError> {
+        todo!()
+    }
+
+    fn are_buffers_empty(&self) -> bool {
+        todo!()
+    }
+
+    fn try_receive(&mut self, _: Duration) -> Result<bool, ChannelError> {
+        todo!()
+    }
+}

@@ -1,8 +1,14 @@
+use std::sync::{Arc, Mutex};
+
 use crate::DataVersion;
 
 use super::{ChannelError, Packet, SenderChannel};
 
-//unsafe impl Send for WriteChannel {}
+pub struct TypedWriteChannel<WRITE: Writer + ?Sized> {
+    pub writer: Box<WRITE>,
+}
+
+pub trait Writer {}
 
 pub struct BufferWriter<U> {
     pub channels: Vec<SenderChannel<U>>,
@@ -17,19 +23,25 @@ impl<U: Clone> BufferWriter<U> {
     }
     pub fn write(&self, data: U, version: &DataVersion) -> Result<(), ChannelError> {
         self.channels
-            .iter().try_for_each(|sender| sender.send(Packet::<U>::new(data.clone(), *version)))?;
+            .iter()
+            .try_for_each(|sender| sender.send(Packet::<U>::new(data.clone(), version.clone())))?;
         Ok(())
     }
 }
 
 macro_rules! write_channels {
     ($struct_name:ident, $($T:ident),+) => {
-       struct $struct_name<$($T: Clone),+> {
+        #[allow(non_camel_case_types)]
+       pub struct $struct_name<$($T: Clone),+> {
             $(
                 $T: BufferWriter<$T>,
             )+
         }
 
+        #[allow(non_camel_case_types)]
+        impl<$($T: Clone),+> Writer for $struct_name<$($T),+> {}
+
+        #[allow(non_camel_case_types, dead_code)]
         impl<$($T: Clone),+> $struct_name<$($T),+> {
             pub fn create() -> Self {
                 Self {
@@ -45,6 +57,8 @@ macro_rules! write_channels {
                 }
             )+
         }
+
+        unsafe impl<$($T: Clone),+> Send for TypedWriteChannel<$struct_name<$($T),+>> {}
     };
 }
 
@@ -60,12 +74,9 @@ write_channels!(WriteChannel8, c1, c2, c3, c4, c5, c6, c7, c8);
 #[cfg(test)]
 mod tests {
     use crate::channels::typed_channel;
-    
-    
+
     use crate::channels::ReceiverChannel;
-    
-    
-    
+
     use crate::DataVersion;
 
     use super::WriteChannel3;
