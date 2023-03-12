@@ -33,12 +33,6 @@ pub enum BufferError {
 pub type BufferIterator<'a, T> = dyn Iterator<Item = &'a Packet<T>> + 'a;
 
 pub trait OrderedBuffer {
-    fn get(
-        &mut self,
-        channel: &str,
-        version: &DataVersion,
-    ) -> Result<Option<UntypedPacket>, BufferError>;
-
     fn available_channels(&self) -> Vec<&str>;
 
     fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
@@ -61,18 +55,14 @@ impl OutputDelivery for NoBuffer {
 
     fn get_packets_for_version(
         &mut self,
-        data_versions: &HashMap<String, Option<DataVersion>>,
-        exact_match: bool,
+        _data_versions: &HashMap<String, Option<DataVersion>>,
+        _exact_match: bool,
     ) -> Option<Self::OUTPUT> {
         todo!()
     }
 }
 
 impl OrderedBuffer for NoBuffer {
-    fn get(&mut self, _: &str, _: &DataVersion) -> Result<Option<UntypedPacket>, BufferError> {
-        todo!()
-    }
-
     fn available_channels(&self) -> Vec<&str> {
         todo!()
     }

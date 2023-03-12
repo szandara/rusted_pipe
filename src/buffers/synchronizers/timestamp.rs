@@ -1,6 +1,6 @@
 use crate::{buffers::OrderedBuffer, DataVersion};
 
-use super::{get_packets_for_version, synchronize, PacketSynchronizer};
+use super::{synchronize, PacketSynchronizer};
 use crate::packet::WorkQueue;
 use std::{
     collections::HashMap,
@@ -15,7 +15,7 @@ impl PacketSynchronizer for TimestampSynchronizer {
         &mut self,
         ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
     ) -> Option<HashMap<String, Option<DataVersion>>> {
-        synchronize(&mut ordered_buffer.clone())
+        synchronize(ordered_buffer.clone())
     }
 }
 

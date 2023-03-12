@@ -126,7 +126,6 @@ pub fn link<U: Clone>(
 impl Graph {
     pub fn new() -> Self {
         Graph {
-            //nodes: IndexMap::<String, Node>::default(),
             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
             thread_control: vec![],
             pool: futures::executor::ThreadPool::new().expect("Failed to build pool"),
@@ -539,7 +538,7 @@ mod tests {
     impl TerminalProcessor<ReadChannel2<String, String>> for TestNodeConsumer {
         fn handle(
             &mut self,
-            mut input: ReadChannel2PacketSet<String, String>,
+            input: ReadChannel2PacketSet<String, String>,
         ) -> Result<(), RustedPipeError> {
             println!(
                 "Recevied {} at {}",

@@ -56,7 +56,7 @@ pub struct FirstSyncSynchronizer {}
 impl PacketSynchronizer for FirstSyncSynchronizer {
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+        _ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
     ) -> Option<HashMap<String, Option<DataVersion>>> {
         // let mut versions: Option<HashMap<ChannelID, Option<DataVersion>>> = None;
 

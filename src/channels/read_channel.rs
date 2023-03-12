@@ -96,16 +96,6 @@ macro_rules! read_channels {
 
         #[allow(non_camel_case_types)]
         impl<$($T: Clone),+> OrderedBuffer for $struct_name<$($T),+> {
-            fn get(&mut self, channel: &str, version: &DataVersion) -> Result<Option<UntypedPacket>, BufferError> {
-                $(
-                    if channel == stringify!($T) {
-                        return Ok(Some(self.$T.buffer.get(version).unwrap().clone().to_untyped()));
-                    }
-                )+
-
-                Ok(None)
-            }
-
             fn available_channels(&self) -> Vec<&str> {
                 vec![$(stringify!($T),)+]
             }
