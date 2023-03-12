@@ -1,10 +1,10 @@
-use super::{PacketSynchronizer};
+use super::PacketSynchronizer;
 
-
-use crate::buffers::OrderedBuffer;
+use crate::{buffers::OrderedBuffer, DataVersion};
 
 use crate::packet::WorkQueue;
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default)]
@@ -56,9 +56,8 @@ pub struct FirstSyncSynchronizer {}
 impl PacketSynchronizer for FirstSyncSynchronizer {
     fn synchronize(
         &mut self,
-        _ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
-        _work_queue: Arc<WorkQueue>,
-    ) {
+        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+    ) -> Option<HashMap<String, Option<DataVersion>>> {
         // let mut versions: Option<HashMap<ChannelID, Option<DataVersion>>> = None;
 
         // {
@@ -85,6 +84,7 @@ impl PacketSynchronizer for FirstSyncSynchronizer {
         //         work_queue.push(packet_set);
         //     }
         // }
+        None
     }
 }
 

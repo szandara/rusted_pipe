@@ -1,19 +1,24 @@
-use std::sync::Arc;
-use std::sync::Mutex;
-
 use super::ChannelError;
+use super::Packet;
+
 use super::ReceiverChannel;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
 use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::BufferError;
 use crate::buffers::OrderedBuffer;
+use crate::packet::typed::PacketSetTrait;
 use crate::packet::ReadEvent;
 use crate::packet::UntypedPacket;
 use crate::packet::WorkQueue;
 use crate::DataVersion;
+
 use crossbeam::channel::select;
 use crossbeam::channel::Sender;
+use paste::item;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 pub struct BufferReceiver<U, T: FixedSizeBuffer<Data = U> + ?Sized> {
@@ -37,23 +42,57 @@ impl<U, T: FixedSizeBuffer<Data = U> + ?Sized> BufferReceiver<U, T> {
     }
 }
 
-pub struct ReadChannel<T: OrderedBuffer> {
+pub struct ReadChannel<T: OutputDelivery> {
     pub synch_strategy: Box<dyn PacketSynchronizer>,
-    pub work_queue: Option<Arc<WorkQueue>>,
+    pub work_queue: Option<Arc<WorkQueue<T::OUTPUT>>>,
     pub channels: Arc<Mutex<T>>,
 }
 
-unsafe impl<T: OrderedBuffer> Sync for ReadChannel<T> {}
-unsafe impl<T: OrderedBuffer> Send for ReadChannel<T> {}
+unsafe impl<T: OutputDelivery + OrderedBuffer + Send> Sync for ReadChannel<T> {}
+unsafe impl<T: OutputDelivery + OrderedBuffer + Send> Send for ReadChannel<T> {}
+
+fn get_data<T: Clone>(
+    buffer: &mut RtRingBuffer<T>,
+    data_version: &Option<DataVersion>,
+    exact_match: bool,
+) -> Option<Packet<T>> {
+    loop {
+        let removed_packet = buffer.pop();
+
+        if let Some(entry) = removed_packet {
+            if let Some(data_version) = data_version {
+                if entry.version == *data_version {
+                    return Some(entry);
+                } else if exact_match {
+                    break;
+                }
+            }
+            if exact_match {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    return None;
+}
+
+pub trait Reader {}
 
 macro_rules! read_channels {
     ($struct_name:ident, $($T:ident),+) => {
-        #[allow(non_camel_case_types)]
-        pub struct $struct_name<$($T: Clone),+> {
-            $(
-                $T: BufferReceiver<$T, RtRingBuffer<$T>>,
-            )+
+        item!{
+            use crate::packet::typed::[<$struct_name PacketSet>];
+            #[allow(non_camel_case_types)]
+            pub struct $struct_name<$($T: Clone),+> {
+                $(
+                    $T: BufferReceiver<$T, RtRingBuffer<$T>>,
+                )+
+            }
         }
+
+        #[allow(non_camel_case_types)]
+        impl<$($T: Clone),+> Reader for $struct_name<$($T),+> {}
 
         #[allow(non_camel_case_types)]
         impl<$($T: Clone),+> OrderedBuffer for $struct_name<$($T),+> {
@@ -138,8 +177,44 @@ macro_rules! read_channels {
                     &mut self.$T
                 }
             )+
+
+
+        }
+
+        item! {
+            #[allow(non_camel_case_types)]
+            impl<$($T: Clone),+> OutputDelivery for $struct_name<$($T),+> {
+                type OUTPUT = [<$struct_name PacketSet>]<$($T),+>;
+
+                fn get_packets_for_version(
+                    &mut self,
+                    data_versions: &HashMap<String, Option<DataVersion>>,
+                    exact_match: bool,
+                ) -> Option<Self::OUTPUT> {
+                    let mut result = [<$struct_name PacketSet>]::<$($T),+>::create();
+
+                    $(
+                        let channel = stringify!($T);
+                        let version = data_versions.get(channel).expect("Cannot find channel {channel}");
+                        let data = get_data(&mut self.$T.buffer, version, exact_match);
+                        result.[<set_ $T>](data);
+                    )+
+
+
+                    Some(result)
+                }
+            }
         }
     };
+}
+
+pub trait OutputDelivery {
+    type OUTPUT: PacketSetTrait + Send;
+    fn get_packets_for_version(
+        &mut self,
+        data_versions: &HashMap<String, Option<DataVersion>>,
+        exact_match: bool,
+    ) -> Option<Self::OUTPUT>;
 }
 
 read_channels!(ReadChannel1, c1);
@@ -151,12 +226,12 @@ read_channels!(ReadChannel6, c1, c2, c3, c4, c5, c6);
 read_channels!(ReadChannel7, c1, c2, c3, c4, c5, c6, c7);
 read_channels!(ReadChannel8, c1, c2, c3, c4, c5, c6, c7, c8);
 
-unsafe impl Send for ReadEvent {}
+unsafe impl<T: Send> Send for ReadEvent<T> {}
 
-impl<T: OrderedBuffer + 'static> ReadChannel<T> {
+impl<T: OutputDelivery + OrderedBuffer + 'static> ReadChannel<T> {
     pub fn new(
         synch_strategy: Box<dyn PacketSynchronizer>,
-        work_queue: Option<Arc<WorkQueue>>,
+        work_queue: Option<Arc<WorkQueue<T::OUTPUT>>>,
         channels: T,
     ) -> Self {
         ReadChannel {
@@ -168,8 +243,18 @@ impl<T: OrderedBuffer + 'static> ReadChannel<T> {
 
     pub fn synchronize(&mut self) {
         if let Some(queue) = self.work_queue.as_ref() {
-            self.synch_strategy
-                .synchronize(self.channels.clone(), queue.clone());
+            let synch = self.synch_strategy.synchronize(self.channels.clone());
+            if let Some(sync) = synch {
+                println!("{:?}", sync);
+                let value = self
+                    .channels
+                    .lock()
+                    .unwrap()
+                    .get_packets_for_version(&sync, false);
+                if let Some(value) = value {
+                    queue.push(value);
+                }
+            }
         }
     }
 
@@ -207,7 +292,7 @@ impl<T: OrderedBuffer + 'static> ReadChannel<T> {
         true
     }
 
-    pub fn start(&mut self, work_queue: Arc<WorkQueue>) {
+    pub fn start(&mut self, work_queue: Arc<WorkQueue<T::OUTPUT>>) {
         self.work_queue = Some(work_queue);
     }
 
@@ -227,6 +312,7 @@ mod tests {
     use crate::channels::ReadChannel;
     use crate::channels::SenderChannel;
 
+    use crate::packet::typed::ReadChannel2PacketSet;
     use crate::packet::Packet;
     use crate::packet::WorkQueue;
     use crate::DataVersion;
@@ -310,7 +396,9 @@ mod tests {
         );
         let mut read_channel = ReadChannel::new(
             synch_strategy,
-            Some(Arc::new(WorkQueue::default())),
+            Some(Arc::new(
+                WorkQueue::<ReadChannel2PacketSet<String, String>>::default(),
+            )),
             read_channel2,
         );
 

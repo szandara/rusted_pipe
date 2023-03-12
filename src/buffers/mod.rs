@@ -2,13 +2,17 @@ pub mod channel_buffers;
 pub mod single_buffers;
 pub mod synchronizers;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::channels::read_channel::OutputDelivery;
 use crate::channels::ChannelError;
 use crate::channels::Packet;
+use crate::packet::typed::ReadChannel1PacketSet;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
+use crate::packet::WorkQueue;
 use thiserror::Error;
 
 pub type PacketBufferAddress = (ChannelID, DataVersion);
@@ -51,6 +55,19 @@ pub trait OrderedBuffer {
 }
 
 pub struct NoBuffer {}
+
+impl OutputDelivery for NoBuffer {
+    type OUTPUT = ReadChannel1PacketSet<String>;
+
+    fn get_packets_for_version(
+        &mut self,
+        data_versions: &HashMap<String, Option<DataVersion>>,
+        exact_match: bool,
+    ) -> Option<Self::OUTPUT> {
+        todo!()
+    }
+}
+
 impl OrderedBuffer for NoBuffer {
     fn get(&mut self, _: &str, _: &DataVersion) -> Result<Option<UntypedPacket>, BufferError> {
         todo!()

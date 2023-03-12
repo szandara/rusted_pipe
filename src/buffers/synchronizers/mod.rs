@@ -14,8 +14,7 @@ pub trait PacketSynchronizer: Send {
     fn synchronize(
         &mut self,
         ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
-        work_queue: Arc<WorkQueue>,
-    );
+    ) -> Option<HashMap<String, Option<DataVersion>>>;
 }
 
 fn synchronize(

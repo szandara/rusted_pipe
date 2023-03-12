@@ -15,6 +15,7 @@ use std::time::Duration;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::OrderedBuffer;
 use crate::channels::read_channel::BufferReceiver;
+use crate::channels::read_channel::OutputDelivery;
 use crate::channels::typed_channel;
 use crate::channels::typed_write_channel::BufferWriter;
 use crate::channels::typed_write_channel::TypedWriteChannel;
@@ -33,73 +34,69 @@ use super::channels::ReadChannel;
 
 use super::RustedPipeError;
 
-type ProcessorSafe<T> = Arc<Mutex<dyn Processor<WRITE = T>>>;
-
-pub enum Nodes<READ: OrderedBuffer, WRITE: Writer + 'static> {
-    TerminalHandler(Box<TerminalNode<READ>>),
-    NodeHandler(Box<Node<READ, WRITE>>),
-    SourceHandler(Box<SourceNode<WRITE>>),
+pub enum Nodes<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + 'static> {
+    TerminalHandler(Box<TerminalNode<INPUT>>),
+    NodeHandler(Box<Node<INPUT, OUTPUT>>),
+    SourceHandler(Box<SourceNode<OUTPUT>>),
 }
 
-enum Processors<WRITE: Writer + 'static> {
-    Processor(Box<dyn Processor<WRITE = WRITE>>),
-    TerminalProcessor(Box<dyn TerminalProcessor>),
+enum Processors<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + 'static> {
+    SourceProcessor(Box<dyn SourceProcessor<WRITE = OUTPUT>>),
+    Processor(Box<dyn Processor<INPUT, WRITE = OUTPUT>>),
+    TerminalProcessor(Box<dyn TerminalProcessor<INPUT>>),
 }
 
 /// PROCESSORS
-pub struct Node<READ: OrderedBuffer, WRITE: Writer + 'static> {
+pub struct Node<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + 'static> {
     pub id: String,
-    pub read_channel: ReadChannel<READ>,
-    pub handler: Box<dyn Processor<WRITE = WRITE>>,
-    pub work_queue: WorkQueue,
-    pub write_channel: TypedWriteChannel<WRITE>,
+    pub read_channel: ReadChannel<INPUT>,
+    pub handler: Box<dyn Processor<INPUT, WRITE = OUTPUT>>,
+    pub work_queue: WorkQueue<INPUT::OUTPUT>,
+    pub write_channel: TypedWriteChannel<OUTPUT>,
 }
 
 pub struct SourceNode<WRITE: Writer + 'static> {
     pub id: String,
     pub write_channel: TypedWriteChannel<WRITE>,
-    pub handler: Box<dyn Processor<WRITE = WRITE>>,
-    pub work_queue: WorkQueue,
+    pub handler: Box<dyn SourceProcessor<WRITE = WRITE>>,
 }
 
-pub struct TerminalNode<READ: OrderedBuffer> {
+pub struct TerminalNode<INPUT: OutputDelivery + OrderedBuffer> {
     pub id: String,
-    pub read_channel: ReadChannel<READ>,
-    pub handler: Box<dyn TerminalProcessor>,
-    pub work_queue: WorkQueue,
+    pub read_channel: ReadChannel<INPUT>,
+    pub handler: Box<dyn TerminalProcessor<INPUT>>,
+    pub work_queue: WorkQueue<INPUT::OUTPUT>,
 }
 
-pub trait NodeTrait<READ: OrderedBuffer, WRITE: Writer> {
-    fn start(
-        self,
-    ) -> (
-        String,
-        Option<TypedWriteChannel<WRITE>>,
-        Option<ReadChannel<READ>>,
-        Option<ProcessorSafe<WRITE>>,
-        WorkQueue,
-    );
-}
-
-impl<READ: OrderedBuffer, WRITE: Writer> fmt::Debug for Node<READ, WRITE> {
+impl<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer> fmt::Debug for Node<INPUT, OUTPUT> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.id)
     }
 }
 
-pub trait Processor: Sync + Send {
+pub trait SourceProcessor: Sync + Send {
     type WRITE: Writer;
     fn handle(
         &mut self,
-        input: PacketSet,
         output: MutexGuard<TypedWriteChannel<Self::WRITE>>,
     ) -> Result<(), RustedPipeError>;
 
     fn id(&self) -> &String;
 }
 
-pub trait TerminalProcessor: Sync + Send {
-    fn handle(&mut self, input: PacketSet) -> Result<(), RustedPipeError>;
+pub trait Processor<INPUT: OutputDelivery>: Sync + Send {
+    type WRITE: Writer;
+    fn handle(
+        &mut self,
+        input: INPUT::OUTPUT,
+        output: MutexGuard<TypedWriteChannel<Self::WRITE>>,
+    ) -> Result<(), RustedPipeError>;
+
+    fn id(&self) -> &String;
+}
+
+pub trait TerminalProcessor<INPUT: OutputDelivery>: Sync + Send {
+    fn handle(&mut self, input: INPUT::OUTPUT) -> Result<(), RustedPipeError>;
 
     fn id(&self) -> &String;
 }
@@ -148,10 +145,13 @@ impl Graph {
     //     }
     // }
 
-    fn get_worker<READ: OrderedBuffer + 'static, WRITE: Writer + Send + 'static>(
+    fn get_worker<
+        INPUT: Send + OutputDelivery + OrderedBuffer + 'static,
+        OUTPUT: Writer + Send + 'static,
+    >(
         &mut self,
-        node: Nodes<READ, WRITE>,
-    ) -> (String, ProcessorWorker<WRITE>) {
+        node: Nodes<INPUT, OUTPUT>,
+    ) -> (String, ProcessorWorker<INPUT, OUTPUT>) {
         let reading_running_thread = self.running.clone();
         match node {
             Nodes::NodeHandler(node) => {
@@ -183,8 +183,8 @@ impl Graph {
                 let work_queue_processor = work_queue;
                 (
                     id.clone(),
-                    ProcessorWorker::<WRITE> {
-                        work_queue: work_queue_processor,
+                    ProcessorWorker::<INPUT, OUTPUT> {
+                        work_queue: Some(work_queue_processor),
                         processor: Arc::new(Mutex::new(Processors::Processor(handler))),
                         write_channel: Some(Arc::new(Mutex::new(write_channel))),
                         status: Arc::new(Atomic::new(WorkerStatus::Idle)),
@@ -192,20 +192,16 @@ impl Graph {
                     },
                 )
             }
-            Nodes::SourceHandler(node) => {
-                let work_queue = Arc::new(node.work_queue);
-                let work_queue_processor = work_queue;
-                (
-                    node.id.clone(),
-                    ProcessorWorker {
-                        work_queue: work_queue_processor,
-                        processor: Arc::new(Mutex::new(Processors::Processor(node.handler))),
-                        write_channel: Some(Arc::new(Mutex::new(node.write_channel))),
-                        status: Arc::new(Atomic::new(WorkerStatus::Idle)),
-                        is_source: true,
-                    },
-                )
-            }
+            Nodes::SourceHandler(node) => (
+                node.id.clone(),
+                ProcessorWorker {
+                    work_queue: None,
+                    processor: Arc::new(Mutex::new(Processors::SourceProcessor(node.handler))),
+                    write_channel: Some(Arc::new(Mutex::new(node.write_channel))),
+                    status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+                    is_source: true,
+                },
+            ),
             Nodes::TerminalHandler(node) => {
                 let (id, work_queue, mut read_channel, handler) =
                     (node.id, node.work_queue, node.read_channel, node.handler);
@@ -226,7 +222,7 @@ impl Graph {
                 (
                     id_clone,
                     ProcessorWorker {
-                        work_queue: work_queue_processor,
+                        work_queue: Some(work_queue_processor),
                         processor: Arc::new(Mutex::new(Processors::TerminalProcessor(handler))),
                         write_channel: None,
                         status: Arc::new(Atomic::new(WorkerStatus::Idle)),
@@ -237,9 +233,12 @@ impl Graph {
         }
     }
 
-    pub fn start_node<READ: OrderedBuffer + 'static, WRITE: Writer + Send + 'static>(
+    pub fn start_node<
+        INPUT: Send + OutputDelivery + OrderedBuffer + 'static,
+        OUTPUT: Writer + Send + 'static,
+    >(
         &mut self,
-        processor: Nodes<READ, WRITE>,
+        processor: Nodes<INPUT, OUTPUT>,
     ) {
         self.running.swap(GraphStatus::Running, Ordering::Relaxed);
 
@@ -321,10 +320,10 @@ impl Graph {
     }
 }
 
-struct ProcessorWorker<WRITE: Writer + Send + 'static> {
-    work_queue: Arc<WorkQueue>,
-    processor: Arc<Mutex<Processors<WRITE>>>,
-    write_channel: Option<Arc<Mutex<TypedWriteChannel<WRITE>>>>,
+struct ProcessorWorker<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + Send + 'static> {
+    work_queue: Option<Arc<WorkQueue<INPUT::OUTPUT>>>,
+    processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
+    write_channel: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
     status: Arc<Atomic<WorkerStatus>>,
     is_source: bool,
 }
@@ -345,26 +344,26 @@ enum WorkerStatus {
 
 type Wait = Arc<(Mutex<WorkerStatus>, Condvar)>;
 
-fn consume<WRITE>(
+fn consume<INPUT: OutputDelivery + OrderedBuffer + Send + 'static, OUTPUT>(
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     _free: Wait,
-    worker: ProcessorWorker<WRITE>,
+    worker: ProcessorWorker<INPUT, OUTPUT>,
     done_notification: Sender<String>,
     thread_pool: futures::executor::ThreadPool,
 ) where
-    WRITE: Writer + 'static + Send,
+    OUTPUT: Writer + 'static + Send,
 {
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
         if worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
             let lock_status = worker.status.clone();
 
-            let mut packet = PacketSet::default();
-            if !worker.is_source {
-                let task = worker.work_queue.steal();
+            let mut packet = None;
+            if let Some(work_queue) = worker.work_queue.as_ref() {
+                let task = work_queue.steal();
                 if let Some(read_event) = task.success() {
                     println!("Task");
-                    packet = read_event.packet_data;
+                    packet = Some(read_event.packet_data);
                 } else {
                     // TODO: make work_queue timeout
                     println!("Sending DONE {}", id.clone());
@@ -387,9 +386,12 @@ fn consume<WRITE>(
             let future = async move {
                 let result = match &mut *processor_clone.lock().unwrap() {
                     Processors::Processor(proc) => {
-                        proc.handle(packet, arc_write_channel.unwrap().lock().unwrap())
+                        proc.handle(packet.unwrap(), arc_write_channel.unwrap().lock().unwrap())
                     }
-                    Processors::TerminalProcessor(proc) => proc.handle(packet),
+                    Processors::TerminalProcessor(proc) => proc.handle(packet.unwrap()),
+                    Processors::SourceProcessor(proc) => {
+                        proc.handle(arc_write_channel.unwrap().lock().unwrap())
+                    }
                 };
                 match result {
                     Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
@@ -417,7 +419,7 @@ fn consume<WRITE>(
     println!("{:?} - {:?}", worker.status, running);
 }
 
-fn read_channel_data<T>(
+fn read_channel_data<T: OutputDelivery>(
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     mut read_channel: ReadChannel<T>,
@@ -444,6 +446,7 @@ mod tests {
     use crate::channels::read_channel::ReadChannel2;
     use crate::channels::typed_write_channel::WriteChannel1;
 
+    use crate::packet::typed::ReadChannel2PacketSet;
     use crate::DataVersion;
     use crossbeam::channel::unbounded;
     use crossbeam::channel::Receiver;
@@ -471,11 +474,10 @@ mod tests {
         }
     }
 
-    impl Processor for TestNodeProducer {
+    impl SourceProcessor for TestNodeProducer {
         type WRITE = WriteChannel1<String>;
         fn handle(
             &mut self,
-            mut _input: PacketSet,
             mut output_channel: MutexGuard<TypedWriteChannel<Self::WRITE>>,
         ) -> Result<(), RustedPipeError> {
             thread::sleep(Duration::from_millis(self.produce_time_ms));
@@ -516,12 +518,15 @@ mod tests {
 
     struct TestNodeConsumer {
         id: String,
-        output: Sender<PacketSet>,
+        output: Sender<ReadChannel2PacketSet<String, String>>,
         counter: u32,
         consume_time_ms: u64,
     }
     impl TestNodeConsumer {
-        fn new(output: Sender<PacketSet>, consume_time_ms: u64) -> Self {
+        fn new(
+            output: Sender<ReadChannel2PacketSet<String, String>>,
+            consume_time_ms: u64,
+        ) -> Self {
             TestNodeConsumer {
                 id: "consumer".to_string(),
                 output,
@@ -531,8 +536,11 @@ mod tests {
         }
     }
 
-    impl TerminalProcessor for TestNodeConsumer {
-        fn handle(&mut self, mut _input: PacketSet) -> Result<(), RustedPipeError> {
+    impl TerminalProcessor<ReadChannel2<String, String>> for TestNodeConsumer {
+        fn handle(
+            &mut self,
+            mut input: ReadChannel2PacketSet<String, String>,
+        ) -> Result<(), RustedPipeError> {
             println!(
                 "Recevied {} at {}",
                 self.counter,
@@ -541,7 +549,7 @@ mod tests {
                     .expect("Time went backwards")
                     .as_millis()
             );
-            self.output.send(_input).unwrap();
+            self.output.send(input).unwrap();
             thread::sleep(Duration::from_millis(self.consume_time_ms));
             Ok(())
         }
@@ -563,7 +571,6 @@ mod tests {
         let id = producer.id.clone();
         SourceNode {
             handler: Box::new(producer),
-            work_queue: WorkQueue::default(),
             write_channel,
             id,
         }
@@ -571,7 +578,7 @@ mod tests {
 
     fn create_consumer_node(
         consumer: TestNodeConsumer,
-        consumer_queue_strategy: WorkQueue,
+        consumer_queue_strategy: WorkQueue<ReadChannel2PacketSet<String, String>>,
         buffer_size: usize,
         block_full: bool,
     ) -> TerminalNode<ReadChannel2<String, String>> {
@@ -582,7 +589,9 @@ mod tests {
         );
         let read_channel = ReadChannel::new(
             synch_strategy,
-            Some(Arc::new(WorkQueue::default())),
+            Some(Arc::new(
+                WorkQueue::<ReadChannel2PacketSet<String, String>>::default(),
+            )),
             read_channel2,
         );
 
@@ -599,8 +608,8 @@ mod tests {
         node0: TestNodeProducer,
         node1: TestNodeProducer,
         consume_time_ms: u64,
-        consumer_queue_strategy: WorkQueue,
-    ) -> (Graph, Receiver<PacketSet>) {
+        consumer_queue_strategy: WorkQueue<ReadChannel2PacketSet<String, String>>,
+    ) -> (Graph, Receiver<ReadChannel2PacketSet<String, String>>) {
         let mut node0 = create_source_node(node0);
         let mut node1 = create_source_node(node1);
 
@@ -630,14 +639,13 @@ mod tests {
         (graph, output_check)
     }
 
-    fn check_results(results: &Vec<PacketSet>, max_packets: usize) {
+    fn check_results(results: &Vec<ReadChannel2PacketSet<String, String>>, max_packets: usize) {
         assert_eq!(results.len(), max_packets);
         for (i, result) in results.iter().enumerate() {
-            assert_eq!(result.channels(), 2);
-            let data_0 = result.get::<String>(0);
-            let data_1 = result.get::<String>(1);
-            assert!(data_0.is_ok(), "At packet {}", i);
-            assert!(data_1.is_ok(), "At packet {}", i);
+            let data_0 = result.c1();
+            let data_1 = result.c2();
+            assert!(data_0.is_some(), "At packet {}", i);
+            assert!(data_1.is_some(), "At packet {}", i);
             assert_eq!(*data_0.unwrap().data, "Test".to_string(), "At packet {}", i);
             assert_eq!(*data_1.unwrap().data, "Test".to_string(), "At packet {}", i);
         }
@@ -781,8 +789,8 @@ mod tests {
         check_results(&results, expected_versions.len());
 
         for (i, expected_version) in expected_versions.into_iter().enumerate() {
-            let v1 = results[i].get::<String>(0).unwrap().version.timestamp;
-            let v2 = results[i].get::<String>(1).unwrap().version.timestamp;
+            let v1 = results[i].c1().unwrap().version.timestamp;
+            let v2 = results[i].c2().unwrap().version.timestamp;
             let range = ((expected_version - 8)..(expected_version + 8)).collect::<Vec<u128>>();
             assert!(
                 range.contains(&v1),

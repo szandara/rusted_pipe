@@ -1,3 +1,5 @@
+pub mod typed;
+
 use std::any::TypeId;
 use std::marker::Copy;
 
@@ -91,29 +93,9 @@ impl UntypedPacketCast for UntypedPacket {
             data: unsafe { Box::from_raw(*self.data as *mut T) as Box<T> },
             version: self.version,
         })
-
-        // match self.data.downcast_ref::<T>() {
-        //     Ok(casted_type) => Ok(Packet::<T> {
-        //         data: casted_type,
-        //         version: self.version,
-        //     }),
-        //     Err(untyped_box) => {
-        //         self.data = untyped_box;
-        //         Err(PacketError::UnexpectedDataType(TypeId::of::<T>()))
-        //     }
-        // }
     }
 
     fn deref<T>(&self) -> Result<PacketView<T>, PacketError> {
-        // let data_ref = self
-        //     .data
-        //     .as_ref()
-        //     .downcast_ref::<T>()
-        //     .ok_or(PacketError::UnexpectedDataType(TypeId::of::<T>()))?;
-        // Ok(PacketView::<T> {
-        //     data: data_ref,
-        //     version: self.version,
-        // })
         Ok(PacketView::<T> {
             data: unsafe { &*(*self.data as *const T) },
             version: self.version,
@@ -210,31 +192,31 @@ impl PacketSet {
 
 unsafe impl Send for PacketSet {}
 
-pub struct ReadEvent {
-    pub packet_data: PacketSet,
+pub struct ReadEvent<T> {
+    pub packet_data: T,
 }
 
-pub struct WorkQueue {
-    queue: Injector<ReadEvent>,
+pub struct WorkQueue<T> {
+    queue: Injector<ReadEvent<T>>,
     max_in_queue: usize,
 }
 
-impl WorkQueue {
+impl<T> WorkQueue<T> {
     pub fn default() -> Self {
         WorkQueue {
-            queue: Injector::<ReadEvent>::default(),
+            queue: Injector::<ReadEvent<T>>::default(),
             max_in_queue: std::usize::MAX,
         }
     }
 
     pub fn new(max_in_queue: usize) -> Self {
         WorkQueue {
-            queue: Injector::<ReadEvent>::default(),
+            queue: Injector::<ReadEvent<T>>::default(),
             max_in_queue,
         }
     }
 
-    pub fn push(&self, packet_set: PacketSet) {
+    pub fn push(&self, packet_set: T) {
         self.queue.push(ReadEvent {
             packet_data: packet_set,
         });
@@ -243,7 +225,7 @@ impl WorkQueue {
         }
     }
 
-    pub fn steal(&self) -> Steal<ReadEvent> {
+    pub fn steal(&self) -> Steal<ReadEvent<T>> {
         self.queue.steal()
     }
 }
