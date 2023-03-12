@@ -108,13 +108,12 @@ pub trait TerminalProcessor: Sync + Send {
 
 pub struct Graph {
     //nodes: IndexMap<String, Node>,
-    running_nodes: HashSet<String>,
     running: Arc<Atomic<GraphStatus>>,
     thread_control: Vec<Wait>,
     pool: futures::executor::ThreadPool,
-    node_threads: Vec<JoinHandle<()>>,
-    read_threads: Vec<JoinHandle<()>>,
-    worker_done: (Sender<usize>, Receiver<usize>),
+    node_threads: Vec<(String, JoinHandle<()>)>,
+    read_threads: Vec<(String, JoinHandle<()>)>,
+    worker_done: (Sender<String>, Receiver<String>),
     reader_empty: (Sender<String>, Receiver<String>),
 }
 
@@ -134,12 +133,11 @@ impl Graph {
         Graph {
             //nodes: IndexMap::<String, Node>::default(),
             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
-            running_nodes: Default::default(),
             thread_control: vec![],
             pool: futures::executor::ThreadPool::new().expect("Failed to build pool"),
-            node_threads: Vec::<JoinHandle<()>>::default(),
-            read_threads: Vec::<JoinHandle<()>>::default(),
-            worker_done: unbounded::<usize>(),
+            node_threads: Vec::<(String, JoinHandle<()>)>::default(),
+            read_threads: Vec::<(String, JoinHandle<()>)>::default(),
+            worker_done: unbounded::<String>(),
             reader_empty: unbounded::<String>(),
         }
     }
@@ -152,17 +150,12 @@ impl Graph {
     //     }
     // }
 
-    pub fn start_node<READ: OrderedBuffer + 'static, WRITE: Writer + Send + 'static>(
+    fn get_worker<READ: OrderedBuffer + 'static, WRITE: Writer + Send + 'static>(
         &mut self,
-        id: usize,
-        processor: Nodes<READ, WRITE>,
-    ) {
-        println!("Starting Node {id}");
-        self.running.swap(GraphStatus::Running, Ordering::Relaxed);
-
+        node: Nodes<READ, WRITE>,
+    ) -> (String, ProcessorWorker<WRITE>) {
         let reading_running_thread = self.running.clone();
-
-        let workers = match processor {
+        match node {
             Nodes::NodeHandler(node) => {
                 let (id, work_queue, mut read_channel, handler, write_channel) = (
                     node.id,
@@ -174,29 +167,46 @@ impl Graph {
                 let work_queue = Arc::new(work_queue);
                 read_channel.start(work_queue.clone());
                 let done_channel = self.reader_empty.0.clone();
-                self.read_threads.push(thread::spawn(move || {
-                    read_channel_data(id, reading_running_thread, read_channel, done_channel)
-                }));
+                let id_clone = id.clone();
+
+                println!("ADDING READER");
+                self.read_threads.push((
+                    id.clone(),
+                    thread::spawn(move || {
+                        read_channel_data(
+                            id_clone,
+                            reading_running_thread,
+                            read_channel,
+                            done_channel,
+                        )
+                    }),
+                ));
 
                 let work_queue_processor = work_queue;
-                ProcessorWorker::<WRITE> {
-                    work_queue: work_queue_processor,
-                    processor: Arc::new(Mutex::new(Processors::Processor(handler))),
-                    write_channel: Some(Arc::new(Mutex::new(write_channel))),
-                    status: Arc::new(Atomic::new(WorkerStatus::Idle)),
-                    is_source: false,
-                }
+                (
+                    id.clone(),
+                    ProcessorWorker::<WRITE> {
+                        work_queue: work_queue_processor,
+                        processor: Arc::new(Mutex::new(Processors::Processor(handler))),
+                        write_channel: Some(Arc::new(Mutex::new(write_channel))),
+                        status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+                        is_source: false,
+                    },
+                )
             }
             Nodes::SourceHandler(node) => {
                 let work_queue = Arc::new(node.work_queue);
                 let work_queue_processor = work_queue;
-                ProcessorWorker {
-                    work_queue: work_queue_processor,
-                    processor: Arc::new(Mutex::new(Processors::Processor(node.handler))),
-                    write_channel: Some(Arc::new(Mutex::new(node.write_channel))),
-                    status: Arc::new(Atomic::new(WorkerStatus::Idle)),
-                    is_source: true,
-                }
+                (
+                    node.id.clone(),
+                    ProcessorWorker {
+                        work_queue: work_queue_processor,
+                        processor: Arc::new(Mutex::new(Processors::Processor(node.handler))),
+                        write_channel: Some(Arc::new(Mutex::new(node.write_channel))),
+                        status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+                        is_source: true,
+                    },
+                )
             }
             Nodes::TerminalHandler(node) => {
                 let (id, work_queue, mut read_channel, handler) =
@@ -204,42 +214,65 @@ impl Graph {
                 let work_queue = Arc::new(work_queue);
                 read_channel.start(work_queue.clone());
                 let done_channel = self.reader_empty.0.clone();
-                self.read_threads.push(thread::spawn(move || {
-                    read_channel_data(id, reading_running_thread, read_channel, done_channel)
-                }));
+                let id_clone = id.clone();
+                println!("ADDING READING THREAD {}", self.read_threads.len());
+                self.read_threads.push((
+                    id.clone(),
+                    thread::spawn(move || {
+                        read_channel_data(id, reading_running_thread, read_channel, done_channel)
+                    }),
+                ));
+                println!("ADDING READING THREAD {}", self.read_threads.len());
 
                 let work_queue_processor = work_queue;
-                ProcessorWorker {
-                    work_queue: work_queue_processor,
-                    processor: Arc::new(Mutex::new(Processors::TerminalProcessor(handler))),
-                    write_channel: None,
-                    status: Arc::new(Atomic::new(WorkerStatus::Idle)),
-                    is_source: false,
-                }
+                (
+                    id_clone,
+                    ProcessorWorker {
+                        work_queue: work_queue_processor,
+                        processor: Arc::new(Mutex::new(Processors::TerminalProcessor(handler))),
+                        write_channel: None,
+                        status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+                        is_source: false,
+                    },
+                )
             }
-        };
+        }
+    }
+
+    pub fn start_node<READ: OrderedBuffer + 'static, WRITE: Writer + Send + 'static>(
+        &mut self,
+        processor: Nodes<READ, WRITE>,
+    ) {
+        self.running.swap(GraphStatus::Running, Ordering::Relaxed);
 
         let consume_running_thread = self.running.clone();
+
+        let (node_id, worker) = self.get_worker(processor);
+
         let done_channel = self.worker_done.0.clone();
 
         let wait = Arc::new((Mutex::new(WorkerStatus::Idle), Condvar::new()));
         let wait_clone = wait.clone();
         let thread_clone = self.pool.clone();
-        self.node_threads.push(thread::spawn(move || {
-            consume(
-                id,
-                consume_running_thread,
-                wait_clone,
-                workers,
-                done_channel,
-                thread_clone,
-            )
-        }));
+        let id_move = node_id.clone();
+        self.node_threads.push((
+            node_id.clone(),
+            thread::spawn(move || {
+                consume(
+                    id_move,
+                    consume_running_thread,
+                    wait_clone,
+                    worker,
+                    done_channel,
+                    thread_clone,
+                )
+            }),
+        ));
         self.thread_control.push(wait.clone());
-        println!("Done Starting Node {id}");
+        println!("Done Starting Node {node_id}");
     }
 
-    pub fn stop(&mut self, wait_for_data: bool) {
+    pub fn stop(&mut self, wait_for_data: bool, timeout: Option<Duration>) {
         let mut empty_set = HashSet::new();
         let mut empty_receiver_set = HashSet::new();
 
@@ -248,29 +281,44 @@ impl Graph {
             self.running
                 .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
 
-            while empty_set.len() != self.running_nodes.len() {
-                let done = self.worker_done.1.recv().unwrap();
-                empty_set.insert(done);
+            while !self.node_threads.iter().all(|n| empty_set.contains(&n.0)) {
+                println!(
+                    "Waiting node threads received done from {} out of {}",
+                    empty_set.len(),
+                    self.node_threads.len()
+                );
+                if let Some(duration) = timeout {
+                    let done = self.worker_done.1.recv_timeout(duration).unwrap();
+                    empty_set.insert(done);
+                } else {
+                    let done = self.worker_done.1.recv().unwrap();
+                    empty_set.insert(done);
+                }
             }
-            while empty_receiver_set.len() != self.read_threads.len() {
-                //self.read_threads.len() {
-                let done = self
-                    .reader_empty
-                    .1
-                    .recv_timeout(Duration::from_millis(2000))
-                    .unwrap();
-                empty_receiver_set.insert(done);
+            while !self.read_threads.iter().all(|n| empty_set.contains(&n.0)) {
+                println!(
+                    "Waiting reader threads received done from {} out of {}",
+                    empty_receiver_set.len(),
+                    self.read_threads.len()
+                );
+                if let Some(duration) = timeout {
+                    let done = self.reader_empty.1.recv_timeout(duration).unwrap();
+                    empty_receiver_set.insert(done);
+                } else {
+                    let done = self.reader_empty.1.recv().unwrap();
+                    empty_receiver_set.insert(done);
+                }
             }
         }
         self.running
             .swap(GraphStatus::Terminating, Ordering::Relaxed);
 
         while self.node_threads.len() > 0 {
-            self.node_threads.pop().unwrap().join().unwrap();
+            self.node_threads.pop().unwrap().1.join().unwrap();
         }
 
         while self.read_threads.len() > 0 {
-            self.read_threads.pop().unwrap().join().unwrap();
+            self.read_threads.pop().unwrap().1.join().unwrap();
         }
     }
 }
@@ -300,11 +348,11 @@ enum WorkerStatus {
 type Wait = Arc<(Mutex<WorkerStatus>, Condvar)>;
 
 fn consume<WRITE>(
-    id: usize,
+    id: String,
     running: Arc<Atomic<GraphStatus>>,
     _free: Wait,
     worker: ProcessorWorker<WRITE>,
-    done_notification: Sender<usize>,
+    done_notification: Sender<String>,
     thread_pool: futures::executor::ThreadPool,
 ) where
     WRITE: Writer + 'static + Send,
@@ -321,9 +369,9 @@ fn consume<WRITE>(
                     packet = read_event.packet_data;
                 } else {
                     // TODO: make work_queue timeout
-                    println!("Sending DONE {id}");
+                    println!("Sending DONE {}", id.clone());
                     if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
-                        done_notification.send(id).unwrap();
+                        done_notification.send(id.clone()).unwrap();
                     }
                     thread::sleep(Duration::from_millis(5));
                     continue;
@@ -335,7 +383,9 @@ fn consume<WRITE>(
                 .store(WorkerStatus::Running, Ordering::Relaxed);
 
             let processor_clone = worker.processor.clone();
+            let id_thread = id.clone();
             let arc_write_channel = worker.write_channel.clone();
+            let done_clone = done_notification.clone();
             let future = async move {
                 let result = match &mut *processor_clone.lock().unwrap() {
                     Processors::Processor(proc) => {
@@ -346,11 +396,12 @@ fn consume<WRITE>(
                 match result {
                     Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
                     Err(RustedPipeError::EndOfStream()) => {
-                        println!("Terminating worker {id:?}");
-                        lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
+                        println!("Terminating worker {id_thread:?}");
+                        lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
+                        done_clone.send(id_thread.clone()).unwrap();
                     }
                     Err(err) => {
-                        println!("Error in worker {id:?}: {err:?}");
+                        println!("Error in worker {id_thread:?}: {err:?}");
                         lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
                     }
                 }
@@ -573,16 +624,9 @@ mod tests {
         .expect("Cannot link channels");
 
         let mut graph = setup_test();
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(
-            0,
-            Nodes::SourceHandler(Box::new(node0)),
-        );
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(
-            1,
-            Nodes::SourceHandler(Box::new(node1)),
-        );
+        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node0)));
+        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node1)));
         graph.start_node::<ReadChannel2<String, String>, WriteChannel1<String>>(
-            2,
             Nodes::TerminalHandler(Box::new(process_terminal)),
         );
         (graph, output_check)
@@ -632,7 +676,7 @@ mod tests {
 
         check_results(&results, max_packets);
 
-        graph.stop(false);
+        graph.stop(false, None);
     }
 
     #[test]
@@ -650,15 +694,15 @@ mod tests {
             mock_processing_time_ms,
             max_packets,
         );
-        println!("ASD");
+
         let (mut graph, output_check) = setup_default_test(node0, node1, 10, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
         let deadline = Instant::now() + Duration::from_millis(500);
 
         thread::sleep(Duration::from_millis(100));
-        println!("ASD");
-        graph.stop(true);
+
+        graph.stop(true, Some(Duration::from_secs(1)));
 
         for _ in 0..max_packets {
             let data = output_check.recv_deadline(deadline);
@@ -701,7 +745,7 @@ mod tests {
         }
 
         check_results(&results, max_packets);
-        graph.stop(false);
+        graph.stop(false, None);
     }
 
     #[test]
@@ -755,7 +799,7 @@ mod tests {
                 expected_version
             );
         }
-        graph.stop(false);
+        graph.stop(false, None);
     }
 
     fn test_slow_consumers_blocks_if_configured(block_full: bool) {
@@ -790,16 +834,9 @@ mod tests {
         )
         .expect("Cannot link channels");
 
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(
-            0,
-            Nodes::SourceHandler(Box::new(node0)),
-        );
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(
-            1,
-            Nodes::SourceHandler(Box::new(node1)),
-        );
+        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node0)));
+        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node1)));
         graph.start_node::<ReadChannel2<String, String>, WriteChannel1<String>>(
-            2,
             Nodes::TerminalHandler(Box::new(process_terminal)),
         );
 
