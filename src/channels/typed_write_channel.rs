@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use crate::DataVersion;
 
 use super::{ChannelError, Packet, SenderChannel};
@@ -52,13 +50,12 @@ macro_rules! write_channels {
             }
 
             $(
+
                 pub fn $T(&mut self) -> &mut BufferWriter<$T> {
                     &mut self.$T
                 }
             )+
         }
-
-        unsafe impl<$($T: Clone),+> Send for TypedWriteChannel<$struct_name<$($T),+>> {}
     };
 }
 

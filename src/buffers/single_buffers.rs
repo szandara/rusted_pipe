@@ -165,21 +165,25 @@ mod fixed_size_buffer_tests {
         $(
             paste::item! {
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_inserts_and_drops_data_if_past_capacity _ $type >] () {
                     let buffer = $type::new(32, false);
                     test_buffer_inserts_and_drops_data_if_past_capacity::<$type<String>>(buffer);
                 }
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_contains_key_returns_expected _ $type >] () {
                     let buffer = $type::new(2, false);
                     test_buffer_contains_key_returns_expected::<$type<String>>(buffer);
                 }
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_get_returns_expected_data _ $type >] () {
                     let buffer = $type::new(2, false);
                     test_buffer_get_returns_expected_data::<$type<String>>(buffer);
                 }
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_insert_returns_errr_if_full_and_block _ $type >] () {
                     let buffer = $type::new(2, true);
                     test_buffer_insert_returns_errr_if_full_and_block::<$type<String>>(buffer);

@@ -1,4 +1,4 @@
-use std::any::{Any, TypeId};
+use std::any::TypeId;
 use std::marker::Copy;
 
 use std::os::raw::c_void;
@@ -56,9 +56,6 @@ pub struct PacketBase<T> {
 pub type Packet<T> = PacketBase<Box<T>>;
 pub type PacketView<'a, T> = PacketBase<&'a T>;
 pub type UntypedPacket = Packet<*const c_void>;
-
-unsafe impl Sync for Packet<dyn Any> {}
-unsafe impl Send for Packet<dyn Any> {}
 
 pub trait UntypedPacketCast {
     fn deref_owned<T>(self) -> Result<Packet<T>, PacketError>;

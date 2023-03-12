@@ -25,10 +25,8 @@ use crossbeam::channel::unbounded;
 use crossbeam::channel::Receiver;
 
 use crossbeam::channel::Sender;
-use futures::io::Write;
 
 use crate::packet::PacketSet;
-use downcast_rs::{impl_downcast, Downcast};
 use std::sync::atomic::Ordering;
 
 use super::channels::ReadChannel;
