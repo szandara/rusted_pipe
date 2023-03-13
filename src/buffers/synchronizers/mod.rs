@@ -18,6 +18,7 @@ fn synchronize(
     ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
 ) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
+    println!("{:?}", min_version);
     let version = min_version.values().next().unwrap();
     if min_version.values().all(|v| v.is_some()) && min_version.values().all(|v| v == version) {
         return Some(min_version);
@@ -37,7 +38,10 @@ fn get_min_versions(buffer: Arc<Mutex<dyn OrderedBuffer>>) -> HashMap<String, Op
 
 #[cfg(test)]
 pub mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
     use crate::{
         buffers::{
@@ -53,6 +57,16 @@ pub mod tests {
             RtRingBuffer::<String>::new(100, false),
             RtRingBuffer::<String>::new(100, false),
         )
+    }
+
+    pub fn check_packet_set_contains_version(
+        versions: &HashMap<String, Option<DataVersion>>,
+        version: u128,
+    ) {
+        println!("{:?}", versions);
+        assert!(versions
+            .values()
+            .all(|v| v.is_some() && v.unwrap().timestamp == version));
     }
 
     pub fn add_data(
@@ -87,12 +101,12 @@ pub mod tests {
 
     #[test]
     fn test_timestamp_synchronize_is_none_if_no_data_on_channel() {
-        let mut buffer = create_test_buffer();
+        let buffer = create_test_buffer();
 
         let safe_buffer = Arc::new(Mutex::new(buffer));
 
-        add_data(safe_buffer.clone(), "test1".to_string(), 2);
-        add_data(safe_buffer.clone(), "test1".to_string(), 3);
+        add_data(safe_buffer.clone(), "c1".to_string(), 2);
+        add_data(safe_buffer.clone(), "c1".to_string(), 3);
 
         let packet_set = synchronize(safe_buffer.clone());
         assert!(packet_set.is_none());

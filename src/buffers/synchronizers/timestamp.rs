@@ -1,7 +1,6 @@
 use crate::{buffers::OrderedBuffer, DataVersion};
 
 use super::{synchronize, PacketSynchronizer};
-use crate::packet::WorkQueue;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -21,36 +20,56 @@ impl PacketSynchronizer for TimestampSynchronizer {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
-    // use crate::buffers::synchronizers::tests::{add_data, create_test_buffer};
+    use super::*;
+    use crate::{
+        buffers::synchronizers::tests::{
+            add_data, check_packet_set_contains_version, create_test_buffer,
+        },
+        channels::read_channel::OutputDelivery,
+    };
 
-    // #[test]
-    // fn test_timestamp_synchronize_returns_all_data() {
-    //     let buffer = create_test_buffer();
-    //     let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
-    //     let mut test_synch = TimestampSynchronizer::default();
+    #[test]
+    fn test_timestamp_synchronize_returns_all_data() {
+        let buffer = create_test_buffer();
+        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let mut test_synch = TimestampSynchronizer::default();
 
-    //     add_data(&safe_buffer, "test1".to_string(), 2);
-    //     add_data(&safe_buffer, "test2".to_string(), 3);
-    //     add_data(&safe_buffer, "test1".to_string(), 3);
+        add_data(safe_buffer.clone(), "c1".to_string(), 2);
+        add_data(safe_buffer.clone(), "c1".to_string(), 3);
 
-    //     // No data because the minum versions do not match
-    //     let work_queue = Arc::new(WorkQueue::default());
-    //     test_synch.synchronize(&safe_buffer, work_queue.clone());
-    //     assert!(work_queue.steal().is_empty());
+        // No data because the minum versions do not match
+        let synch = test_synch.synchronize(safe_buffer.clone());
+        assert!(synch.is_none());
 
-    //     add_data(&safe_buffer, "test2".to_string(), 2);
-    //     add_data(&safe_buffer, "test1".to_string(), 4);
+        add_data(safe_buffer.clone(), "c2".to_string(), 2);
+        add_data(safe_buffer.clone(), "c2".to_string(), 3);
+        add_data(safe_buffer.clone(), "c1".to_string(), 4);
 
-    //     let work_queue = Arc::new(WorkQueue::default());
-    //     test_synch.synchronize(&safe_buffer, work_queue.clone());
-    //     assert!(work_queue.steal().is_success());
-    //     assert!(work_queue.steal().is_success());
+        let synch = test_synch.synchronize(safe_buffer.clone());
+        check_packet_set_contains_version(&synch.as_ref().unwrap(), 2);
 
-    //     assert!(!safe_buffer.lock().unwrap().are_buffers_empty());
+        safe_buffer
+            .lock()
+            .unwrap()
+            .get_packets_for_version(&synch.unwrap(), true);
 
-    //     add_data(&safe_buffer, "test2".to_string(), 4);
-    //     test_synch.synchronize(&safe_buffer, work_queue.clone());
-    //     assert!(safe_buffer.lock().unwrap().are_buffers_empty());
-    // }
+        let synch = test_synch.synchronize(safe_buffer.clone());
+        check_packet_set_contains_version(&synch.as_ref().unwrap(), 3);
+
+        safe_buffer
+            .lock()
+            .unwrap()
+            .get_packets_for_version(&synch.unwrap(), true);
+
+        add_data(safe_buffer.clone(), "c2".to_string(), 4);
+        let synch = test_synch.synchronize(safe_buffer.clone());
+        check_packet_set_contains_version(&synch.as_ref().unwrap(), 4);
+
+        safe_buffer
+            .lock()
+            .unwrap()
+            .get_packets_for_version(&synch.unwrap(), true);
+
+        assert!(safe_buffer.lock().unwrap().are_buffers_empty());
+    }
 }

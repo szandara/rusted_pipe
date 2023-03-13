@@ -3,8 +3,6 @@ use super::PacketSynchronizer;
 use crate::buffers::BufferIterator;
 use crate::{buffers::OrderedBuffer, DataVersion};
 
-use crate::packet::WorkQueue;
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -86,19 +84,11 @@ impl PacketSynchronizer for FirstSyncSynchronizer {
 mod tests {
     use super::*;
     use crate::{
-        buffers::synchronizers::tests::{add_data, create_test_buffer},
+        buffers::synchronizers::tests::{
+            add_data, check_packet_set_contains_version, create_test_buffer,
+        },
         channels::read_channel::OutputDelivery,
     };
-
-    fn test_packet_set_contains_version(
-        versions: &HashMap<String, Option<DataVersion>>,
-        version: u128,
-    ) {
-        println!("{:?}", versions);
-        assert!(versions
-            .values()
-            .all(|v| v.is_some() && v.unwrap().timestamp == version));
-    }
 
     #[test]
     fn test_first_synch_synchronize_returns_all_data() {
@@ -119,7 +109,7 @@ mod tests {
         add_data(safe_buffer.clone(), "c2".to_string(), 1);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
-        test_packet_set_contains_version(synch.as_ref().unwrap(), 1);
+        check_packet_set_contains_version(synch.as_ref().unwrap(), 1);
         safe_buffer
             .lock()
             .unwrap()
@@ -127,6 +117,6 @@ mod tests {
 
         add_data(safe_buffer.clone(), "c2".to_string(), 5);
         let synch = test_synch.synchronize(safe_buffer.clone());
-        test_packet_set_contains_version(synch.as_ref().unwrap(), 5);
+        check_packet_set_contains_version(synch.as_ref().unwrap(), 5);
     }
 }

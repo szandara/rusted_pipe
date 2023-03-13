@@ -19,6 +19,15 @@ pub trait FixedSizeBuffer {
     fn iter(&self) -> Box<BufferIterator>;
 
     fn pop(&mut self) -> Option<Packet<Self::Data>>;
+
+    fn check_order(&self, version: u128) -> Result<(), BufferError> {
+        if let Some(p) = self.peek() {
+            if version <= p.timestamp {
+                return Err(BufferError::OutOfOrder(version, p.timestamp));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -55,6 +64,7 @@ impl<T: Clone> FixedSizeBuffer for RtRingBuffer<T> {
     }
 
     fn insert(&mut self, packet: Packet<T>) -> Result<(), BufferError> {
+        self.check_order(packet.version.timestamp)?;
         if self.block_full && self.buffer.is_full() {
             return Err(BufferError::BufferFull);
         }
@@ -122,6 +132,7 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
     }
 
     fn insert(&mut self, packet: Packet<T>) -> Result<(), BufferError> {
+        self.check_order(packet.version.timestamp)?;
         while self.data.len() >= self.max_size {
             if self.block_full {
                 return Err(BufferError::BufferFull);
@@ -188,6 +199,12 @@ mod fixed_size_buffer_tests {
                     let buffer = $type::new(2, true);
                     test_buffer_insert_returns_errr_if_full_and_block::<$type<String>>(buffer);
                 }
+                #[test]
+                #[allow(non_snake_case)]
+                fn [< test_buffer_returns_error_if_data_out_of_order _ $type >] () {
+                    let buffer = $type::new(3, true);
+                    test_buffer_returns_error_if_data_out_of_order::<$type<String>>(buffer);
+                }
             }
         )*
         }
@@ -217,6 +234,19 @@ mod fixed_size_buffer_tests {
             assert!(buffer.contains_key(&DataVersion { timestamp: i }));
         }
         assert!(!buffer.contains_key(&DataVersion { timestamp: 0 }));
+    }
+
+    fn test_buffer_returns_error_if_data_out_of_order<T: FixedSizeBuffer<Data = String>>(
+        mut buffer: T,
+    ) {
+        let version = DataVersion { timestamp: 1 };
+        let packet = Packet::<String>::new("test".to_string(), version.clone());
+        buffer.insert(packet).unwrap();
+        assert!(buffer.contains_key(&DataVersion { timestamp: 1 }));
+
+        let version = DataVersion { timestamp: 0 };
+        let packet = Packet::<String>::new("test".to_string(), version.clone());
+        assert!(buffer.insert(packet).is_err());
     }
 
     fn test_buffer_get_returns_expected_data<T: FixedSizeBuffer<Data = String>>(mut buffer: T) {

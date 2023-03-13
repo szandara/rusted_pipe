@@ -28,6 +28,10 @@ pub enum BufferError {
     InternalError(String),
     #[error("Buffer is full")]
     BufferFull,
+    #[error(
+        "Trying to insert data returned out of order. Min version {0:?}, trying to insert {1:?}"
+    )]
+    OutOfOrder(u128, u128),
 }
 pub type BufferIterator<'a> = dyn Iterator<Item = &'a DataVersion> + 'a;
 
@@ -86,7 +90,7 @@ impl OrderedBuffer for NoBuffer {
         todo!()
     }
 
-    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>> {
+    fn iterator(&self, _: &str) -> Option<Box<BufferIterator>> {
         todo!()
     }
 }
