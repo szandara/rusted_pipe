@@ -1,4 +1,3 @@
-pub mod channel_buffers;
 pub mod single_buffers;
 pub mod synchronizers;
 
@@ -34,63 +33,3 @@ pub enum BufferError {
     OutOfOrder(u128, u128),
 }
 pub type BufferIterator<'a> = dyn Iterator<Item = &'a DataVersion> + 'a;
-
-pub trait OrderedBuffer {
-    fn available_channels(&self) -> Vec<&str>;
-
-    fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
-
-    fn peek(&self, channel: &str) -> Option<&DataVersion>;
-
-    fn pop(&mut self, channel: &str) -> Result<Option<UntypedPacket>, BufferError>;
-
-    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>>;
-
-    fn are_buffers_empty(&self) -> bool;
-
-    fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
-}
-
-pub struct NoBuffer {}
-
-impl OutputDelivery for NoBuffer {
-    type OUTPUT = ReadChannel1PacketSet<String>;
-
-    fn get_packets_for_version(
-        &mut self,
-        _data_versions: &HashMap<String, Option<DataVersion>>,
-        _exact_match: bool,
-    ) -> Option<Self::OUTPUT> {
-        todo!()
-    }
-}
-
-impl OrderedBuffer for NoBuffer {
-    fn available_channels(&self) -> Vec<&str> {
-        todo!()
-    }
-
-    fn has_version(&self, _: &str, _: &DataVersion) -> bool {
-        todo!()
-    }
-
-    fn peek(&self, _: &str) -> Option<&DataVersion> {
-        todo!()
-    }
-
-    fn pop(&mut self, _: &str) -> Result<Option<UntypedPacket>, BufferError> {
-        todo!()
-    }
-
-    fn are_buffers_empty(&self) -> bool {
-        todo!()
-    }
-
-    fn try_receive(&mut self, _: Duration) -> Result<bool, ChannelError> {
-        todo!()
-    }
-
-    fn iterator(&self, _: &str) -> Option<Box<BufferIterator>> {
-        todo!()
-    }
-}

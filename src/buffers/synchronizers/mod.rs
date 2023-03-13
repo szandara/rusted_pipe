@@ -1,7 +1,7 @@
-pub mod first_sync;
+pub mod real_time;
 pub mod timestamp;
 
-use crate::buffers::OrderedBuffer;
+use crate::channels::read_channel::ChannelBuffer;
 use crate::DataVersion;
 
 use std::collections::HashMap;
@@ -10,12 +10,12 @@ use std::sync::{Arc, Mutex};
 pub trait PacketSynchronizer: Send {
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
     ) -> Option<HashMap<String, Option<DataVersion>>>;
 }
 
 fn synchronize(
-    ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+    ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
 ) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
     println!("{:?}", min_version);
@@ -26,7 +26,7 @@ fn synchronize(
     None
 }
 
-fn get_min_versions(buffer: Arc<Mutex<dyn OrderedBuffer>>) -> HashMap<String, Option<DataVersion>> {
+fn get_min_versions(buffer: Arc<Mutex<dyn ChannelBuffer>>) -> HashMap<String, Option<DataVersion>> {
     let buffer = buffer.lock().unwrap();
     let mut out_map = HashMap::<String, Option<DataVersion>>::default();
 

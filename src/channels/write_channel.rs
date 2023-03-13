@@ -25,7 +25,8 @@ impl WriteChannel {
             .get(channel_id)
             .ok_or(ChannelError::MissingChannel(channel_id.clone()))?;
         data_queues
-            .iter().try_for_each(|sender| sender.send(Packet::<T>::new(data.clone(), *version)))?;
+            .iter()
+            .try_for_each(|sender| sender.send(Packet::<T>::new(data.clone(), *version)))?;
         Ok(())
     }
 
@@ -121,17 +122,5 @@ mod tests {
             .unwrap();
 
         assert!(existing_read_channel.try_receive().is_err());
-
-        // for channel in read_channels {
-        //     assert_eq!(
-        //         channel
-        //             .try_receive()
-        //             .unwrap()
-        //             .data
-        //             .downcast_ref::<String>()
-        //             .unwrap(),
-        //         &"TestData".to_string()
-        //     );
-        // }
     }
 }

@@ -1,4 +1,4 @@
-use crate::{buffers::OrderedBuffer, DataVersion};
+use crate::{channels::read_channel::ChannelBuffer, DataVersion};
 
 use super::{synchronize, PacketSynchronizer};
 use std::{
@@ -12,7 +12,7 @@ pub struct TimestampSynchronizer {}
 impl PacketSynchronizer for TimestampSynchronizer {
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
     ) -> Option<HashMap<String, Option<DataVersion>>> {
         synchronize(ordered_buffer.clone())
     }

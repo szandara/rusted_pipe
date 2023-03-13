@@ -1,13 +1,14 @@
 use super::PacketSynchronizer;
 
 use crate::buffers::BufferIterator;
-use crate::{buffers::OrderedBuffer, DataVersion};
+use crate::channels::read_channel::ChannelBuffer;
+use crate::DataVersion;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default)]
-pub struct FirstSyncSynchronizer {}
+pub struct RealTimeSynchronizer {}
 
 fn find_common_min<'a>(mut iterators: Vec<Box<BufferIterator>>) -> Option<DataVersion> {
     let mut min = None;
@@ -52,10 +53,10 @@ fn find_common_min<'a>(mut iterators: Vec<Box<BufferIterator>>) -> Option<DataVe
     None
 }
 
-impl PacketSynchronizer for FirstSyncSynchronizer {
+impl PacketSynchronizer for RealTimeSynchronizer {
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
     ) -> Option<HashMap<String, Option<DataVersion>>> {
         let mut versions: Option<HashMap<String, Option<DataVersion>>> = None;
 
@@ -94,7 +95,7 @@ mod tests {
     fn test_first_synch_synchronize_returns_all_data() {
         let buffer = create_test_buffer();
         let safe_buffer = Arc::new(Mutex::new(buffer));
-        let mut test_synch = FirstSyncSynchronizer::default();
+        let mut test_synch = RealTimeSynchronizer::default();
 
         add_data(safe_buffer.clone(), "c1".to_string(), 1);
         add_data(safe_buffer.clone(), "c1".to_string(), 2);

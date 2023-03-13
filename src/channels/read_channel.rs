@@ -7,7 +7,6 @@ use crate::buffers::single_buffers::RtRingBuffer;
 use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::BufferError;
 use crate::buffers::BufferIterator;
-use crate::buffers::OrderedBuffer;
 use crate::packet::typed::PacketSetTrait;
 use crate::packet::ReadEvent;
 use crate::packet::UntypedPacket;
@@ -25,6 +24,66 @@ use std::time::Duration;
 pub struct BufferReceiver<U, T: FixedSizeBuffer<Data = U> + ?Sized> {
     pub buffer: Box<T>,
     pub channel: Option<ReceiverChannel<U>>,
+}
+
+pub trait ChannelBuffer {
+    fn available_channels(&self) -> Vec<&str>;
+
+    fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
+
+    fn peek(&self, channel: &str) -> Option<&DataVersion>;
+
+    fn pop(&mut self, channel: &str) -> Result<Option<UntypedPacket>, BufferError>;
+
+    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>>;
+
+    fn are_buffers_empty(&self) -> bool;
+
+    fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
+}
+
+pub struct NoBuffer {}
+
+impl OutputDelivery for NoBuffer {
+    type OUTPUT = ReadChannel1PacketSet<String>;
+
+    fn get_packets_for_version(
+        &mut self,
+        _data_versions: &HashMap<String, Option<DataVersion>>,
+        _exact_match: bool,
+    ) -> Option<Self::OUTPUT> {
+        todo!()
+    }
+}
+
+impl ChannelBuffer for NoBuffer {
+    fn available_channels(&self) -> Vec<&str> {
+        todo!()
+    }
+
+    fn has_version(&self, _: &str, _: &DataVersion) -> bool {
+        todo!()
+    }
+
+    fn peek(&self, _: &str) -> Option<&DataVersion> {
+        todo!()
+    }
+
+    fn pop(&mut self, _: &str) -> Result<Option<UntypedPacket>, BufferError> {
+        todo!()
+    }
+
+    fn are_buffers_empty(&self) -> bool {
+        todo!()
+    }
+
+    fn try_receive(&mut self, _: Duration) -> Result<bool, ChannelError> {
+        todo!()
+    }
+
+    fn iterator(&self, _: &str) -> Option<Box<BufferIterator>> {
+        todo!()
+    }
 }
 
 impl<U, T: FixedSizeBuffer<Data = U> + ?Sized> BufferReceiver<U, T> {
@@ -49,8 +108,8 @@ pub struct ReadChannel<T: OutputDelivery> {
     pub channels: Arc<Mutex<T>>,
 }
 
-unsafe impl<T: OutputDelivery + OrderedBuffer + Send> Sync for ReadChannel<T> {}
-unsafe impl<T: OutputDelivery + OrderedBuffer + Send> Send for ReadChannel<T> {}
+unsafe impl<T: OutputDelivery + ChannelBuffer + Send> Sync for ReadChannel<T> {}
+unsafe impl<T: OutputDelivery + ChannelBuffer + Send> Send for ReadChannel<T> {}
 
 fn get_data<T: Clone>(
     buffer: &mut RtRingBuffer<T>,
@@ -96,7 +155,7 @@ macro_rules! read_channels {
         impl<$($T: Clone),+> Reader for $struct_name<$($T),+> {}
 
         #[allow(non_camel_case_types)]
-        impl<$($T: Clone),+> OrderedBuffer for $struct_name<$($T),+> {
+        impl<$($T: Clone),+> ChannelBuffer for $struct_name<$($T),+> {
             fn available_channels(&self) -> Vec<&str> {
                 vec![$(stringify!($T),)+]
             }
@@ -228,7 +287,7 @@ read_channels!(ReadChannel8, c1, c2, c3, c4, c5, c6, c7, c8);
 
 unsafe impl<T: Send> Send for ReadEvent<T> {}
 
-impl<T: OutputDelivery + OrderedBuffer + 'static> ReadChannel<T> {
+impl<T: OutputDelivery + ChannelBuffer + 'static> ReadChannel<T> {
     pub fn new(
         synch_strategy: Box<dyn PacketSynchronizer>,
         work_queue: Option<Arc<WorkQueue<T::OUTPUT>>>,

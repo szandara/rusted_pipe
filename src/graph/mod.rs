@@ -13,8 +13,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::buffers::single_buffers::FixedSizeBuffer;
-use crate::buffers::OrderedBuffer;
 use crate::channels::read_channel::BufferReceiver;
+use crate::channels::read_channel::ChannelBuffer;
 use crate::channels::read_channel::OutputDelivery;
 use crate::channels::typed_channel;
 use crate::channels::typed_write_channel::BufferWriter;
@@ -34,20 +34,20 @@ use super::channels::ReadChannel;
 
 use super::RustedPipeError;
 
-pub enum Nodes<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + 'static> {
+pub enum Nodes<INPUT: OutputDelivery + ChannelBuffer, OUTPUT: Writer + 'static> {
     TerminalHandler(Box<TerminalNode<INPUT>>),
     NodeHandler(Box<Node<INPUT, OUTPUT>>),
     SourceHandler(Box<SourceNode<OUTPUT>>),
 }
 
-enum Processors<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + 'static> {
+enum Processors<INPUT: OutputDelivery + ChannelBuffer, OUTPUT: Writer + 'static> {
     SourceProcessor(Box<dyn SourceProcessor<WRITE = OUTPUT>>),
     Processor(Box<dyn Processor<INPUT, WRITE = OUTPUT>>),
     TerminalProcessor(Box<dyn TerminalProcessor<INPUT>>),
 }
 
 /// PROCESSORS
-pub struct Node<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + 'static> {
+pub struct Node<INPUT: OutputDelivery + ChannelBuffer, OUTPUT: Writer + 'static> {
     pub id: String,
     pub read_channel: ReadChannel<INPUT>,
     pub handler: Box<dyn Processor<INPUT, WRITE = OUTPUT>>,
@@ -61,14 +61,14 @@ pub struct SourceNode<WRITE: Writer + 'static> {
     pub handler: Box<dyn SourceProcessor<WRITE = WRITE>>,
 }
 
-pub struct TerminalNode<INPUT: OutputDelivery + OrderedBuffer> {
+pub struct TerminalNode<INPUT: OutputDelivery + ChannelBuffer> {
     pub id: String,
     pub read_channel: ReadChannel<INPUT>,
     pub handler: Box<dyn TerminalProcessor<INPUT>>,
     pub work_queue: WorkQueue<INPUT::OUTPUT>,
 }
 
-impl<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer> fmt::Debug for Node<INPUT, OUTPUT> {
+impl<INPUT: OutputDelivery + ChannelBuffer, OUTPUT: Writer> fmt::Debug for Node<INPUT, OUTPUT> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.id)
     }
@@ -145,7 +145,7 @@ impl Graph {
     // }
 
     fn get_worker<
-        INPUT: Send + OutputDelivery + OrderedBuffer + 'static,
+        INPUT: Send + OutputDelivery + ChannelBuffer + 'static,
         OUTPUT: Writer + Send + 'static,
     >(
         &mut self,
@@ -233,7 +233,7 @@ impl Graph {
     }
 
     pub fn start_node<
-        INPUT: Send + OutputDelivery + OrderedBuffer + 'static,
+        INPUT: Send + OutputDelivery + ChannelBuffer + 'static,
         OUTPUT: Writer + Send + 'static,
     >(
         &mut self,
@@ -319,7 +319,7 @@ impl Graph {
     }
 }
 
-struct ProcessorWorker<INPUT: OutputDelivery + OrderedBuffer, OUTPUT: Writer + Send + 'static> {
+struct ProcessorWorker<INPUT: OutputDelivery + ChannelBuffer, OUTPUT: Writer + Send + 'static> {
     work_queue: Option<Arc<WorkQueue<INPUT::OUTPUT>>>,
     processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
     write_channel: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
@@ -343,7 +343,7 @@ enum WorkerStatus {
 
 type Wait = Arc<(Mutex<WorkerStatus>, Condvar)>;
 
-fn consume<INPUT: OutputDelivery + OrderedBuffer + Send + 'static, OUTPUT>(
+fn consume<INPUT: OutputDelivery + ChannelBuffer + Send + 'static, OUTPUT>(
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     _free: Wait,
@@ -424,7 +424,7 @@ fn read_channel_data<T: OutputDelivery>(
     mut read_channel: ReadChannel<T>,
     done_notification: Sender<String>,
 ) where
-    T: OrderedBuffer + 'static,
+    T: ChannelBuffer + 'static,
 {
     println!("Reading read {}", id);
     let id = id.to_string();
@@ -441,7 +441,7 @@ mod tests {
 
     use crate::buffers::single_buffers::RtRingBuffer;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
-    use crate::buffers::NoBuffer;
+    use crate::channels::read_channel::NoBuffer;
     use crate::channels::read_channel::ReadChannel2;
     use crate::channels::typed_write_channel::WriteChannel1;
 
