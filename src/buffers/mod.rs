@@ -12,7 +12,6 @@ use crate::packet::typed::ReadChannel1PacketSet;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
-use crate::packet::WorkQueue;
 use thiserror::Error;
 
 pub type PacketBufferAddress = (ChannelID, DataVersion);
@@ -30,7 +29,7 @@ pub enum BufferError {
     #[error("Buffer is full")]
     BufferFull,
 }
-pub type BufferIterator<'a, T> = dyn Iterator<Item = &'a Packet<T>> + 'a;
+pub type BufferIterator<'a> = dyn Iterator<Item = &'a DataVersion> + 'a;
 
 pub trait OrderedBuffer {
     fn available_channels(&self) -> Vec<&str>;
@@ -41,7 +40,7 @@ pub trait OrderedBuffer {
 
     fn pop(&mut self, channel: &str) -> Result<Option<UntypedPacket>, BufferError>;
 
-    //fn iterator<'a, T>(&'a self, channel: &ChannelID) -> Option<Box<BufferIterator<T>>>;
+    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>>;
 
     fn are_buffers_empty(&self) -> bool;
 
@@ -84,6 +83,10 @@ impl OrderedBuffer for NoBuffer {
     }
 
     fn try_receive(&mut self, _: Duration) -> Result<bool, ChannelError> {
+        todo!()
+    }
+
+    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>> {
         todo!()
     }
 }

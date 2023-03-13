@@ -812,7 +812,7 @@ mod tests {
         let collection_time_ms: u64 = 50;
 
         // Very slow producer
-        let node0 = TestNodeProducer::new("producer1".to_string(), 60, max_packets);
+        let node0 = TestNodeProducer::new("producer1".to_string(), 100, max_packets);
         let node1 = TestNodeProducer::new("producer2".to_string(), 5, max_packets);
 
         let mut node0 = create_source_node(node0);

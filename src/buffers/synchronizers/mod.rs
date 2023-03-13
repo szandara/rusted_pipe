@@ -5,7 +5,7 @@ use crate::buffers::OrderedBuffer;
 use crate::DataVersion;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 pub trait PacketSynchronizer: Send {
     fn synchronize(
@@ -43,7 +43,6 @@ pub mod tests {
         buffers::{
             single_buffers::{FixedSizeBuffer, RtRingBuffer},
             synchronizers::synchronize,
-            OrderedBuffer,
         },
         channels::{read_channel::ReadChannel2, Packet},
         DataVersion,
@@ -57,7 +56,7 @@ pub mod tests {
     }
 
     pub fn add_data(
-        buffer: &mut ReadChannel2<String, String>,
+        buffer: Arc<Mutex<ReadChannel2<String, String>>>,
         channel_id: String,
         version_timestamp: u128,
     ) {
@@ -68,9 +67,21 @@ pub mod tests {
             },
         };
         if channel_id == "c1" {
-            buffer.c1().buffer.insert(packet.clone()).unwrap();
+            buffer
+                .lock()
+                .unwrap()
+                .c1()
+                .buffer
+                .insert(packet.clone())
+                .unwrap();
         } else if channel_id == "c2" {
-            buffer.c2().buffer.insert(packet.clone()).unwrap();
+            buffer
+                .lock()
+                .unwrap()
+                .c2()
+                .buffer
+                .insert(packet.clone())
+                .unwrap();
         }
     }
 
@@ -78,10 +89,10 @@ pub mod tests {
     fn test_timestamp_synchronize_is_none_if_no_data_on_channel() {
         let mut buffer = create_test_buffer();
 
-        add_data(&mut buffer, "test1".to_string(), 2);
-        add_data(&mut buffer, "test1".to_string(), 3);
+        let safe_buffer = Arc::new(Mutex::new(buffer));
 
-        let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
+        add_data(safe_buffer.clone(), "test1".to_string(), 2);
+        add_data(safe_buffer.clone(), "test1".to_string(), 3);
 
         let packet_set = synchronize(safe_buffer.clone());
         assert!(packet_set.is_none());

@@ -1,5 +1,6 @@
 use super::PacketSynchronizer;
 
+use crate::buffers::BufferIterator;
 use crate::{buffers::OrderedBuffer, DataVersion};
 
 use crate::packet::WorkQueue;
@@ -10,133 +11,122 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Default)]
 pub struct FirstSyncSynchronizer {}
 
-// fn find_common_min<'a>(mut iterators: Vec<Box<BufferIterator>>) -> Option<DataVersion> {
-//     let mut min = None;
-//     let mut matches = 0;
-//     loop {
-//         let mut all_end = true;
-//         for iterator in iterators.iter_mut() {
-//             if min.is_none() {
-//                 let mut peekable = iterator.peekable();
-//                 let peek_next = peekable.peek();
-//                 if min.is_none() && peek_next.is_some() {
-//                     min = peekable.next();
-//                     matches += 1;
-//                 }
-//                 continue;
-//             }
+fn find_common_min<'a>(mut iterators: Vec<Box<BufferIterator>>) -> Option<DataVersion> {
+    let mut min = None;
+    let mut matches = 0;
+    loop {
+        let mut all_end = true;
+        for iterator in iterators.iter_mut() {
+            if min.is_none() {
+                let mut peekable = iterator.peekable();
+                let peek_next = peekable.peek();
+                if min.is_none() && peek_next.is_some() {
+                    min = peekable.next();
+                    matches += 1;
+                }
+                continue;
+            }
 
-//             while let Some(next) = iterator.next() {
-//                 if next.version.timestamp > min.unwrap().version.timestamp {
-//                     min = Some(next);
-//                     matches = 1;
-//                     all_end = false;
-//                     break;
-//                 } else if next.version.timestamp == min.unwrap().version.timestamp {
-//                     matches += 1;
-//                     break;
-//                 }
-//                 all_end = false;
-//             }
-//         }
+            while let Some(next) = iterator.next() {
+                if next.timestamp > min.unwrap().timestamp {
+                    min = Some(next);
+                    matches = 1;
+                    all_end = false;
+                    break;
+                } else if next.timestamp == min.unwrap().timestamp {
+                    matches += 1;
+                    break;
+                }
+                all_end = false;
+            }
+        }
 
-//         if all_end {
-//             break;
-//         }
-//     }
+        if all_end {
+            break;
+        }
+    }
 
-//     if let Some(min) = min {
-//         if matches == iterators.len() {
-//             return Some(min.version.clone());
-//         }
-//     }
-//     None
-// }
+    if let Some(min) = min {
+        if matches == iterators.len() {
+            return Some(min.clone());
+        }
+    }
+    None
+}
 
 impl PacketSynchronizer for FirstSyncSynchronizer {
     fn synchronize(
         &mut self,
-        _ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
+        ordered_buffer: Arc<Mutex<dyn OrderedBuffer>>,
     ) -> Option<HashMap<String, Option<DataVersion>>> {
-        // let mut versions: Option<HashMap<ChannelID, Option<DataVersion>>> = None;
+        let mut versions: Option<HashMap<String, Option<DataVersion>>> = None;
 
-        // {
-        //     let locked = ordered_buffer.lock().unwrap();
-        //     let mut iters = vec![];
-        //     for channel in locked.available_channels().clone().into_iter() {
-        //         //iters.push(locked.iterator(&channel).unwrap());
-        //     }
+        {
+            let locked = ordered_buffer.lock().unwrap();
+            let mut iters = vec![];
+            for channel in locked.available_channels().clone().into_iter() {
+                iters.push(locked.iterator(&channel).unwrap());
+            }
 
-        //     if let Some(common_min) = find_common_min(iters) {
-        //         versions = Some(
-        //             locked
-        //                 .available_channels()
-        //                 .iter()
-        //                 .map(|f| (f.clone(), Some(common_min.clone())))
-        //                 .collect(),
-        //         );
-        //     }
-        // }
-        // if let Some(versions) = versions {
-        //     if let Some(packet_set) =
-        //         get_packets_for_version(&versions, &mut ordered_buffer.clone(), false)
-        //     {
-        //         work_queue.push(packet_set);
-        //     }
-        // }
-        None
+            if let Some(common_min) = find_common_min(iters) {
+                versions = Some(
+                    locked
+                        .available_channels()
+                        .iter()
+                        .map(|f| (f.to_string(), Some(common_min.clone())))
+                        .collect(),
+                );
+            }
+        }
+        versions
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
-    // use crate::buffers::synchronizers::tests::{add_data, create_test_buffer};
+    use super::*;
+    use crate::{
+        buffers::synchronizers::tests::{add_data, create_test_buffer},
+        channels::read_channel::OutputDelivery,
+    };
 
-    // fn test_packet_set_contains_version(work_queue: Arc<WorkQueue>, version: u128) {
-    //     assert!(work_queue
-    //         .steal()
-    //         .success()
-    //         .and_then(|v| {
-    //             let out: Vec<u128> = v
-    //                 .packet_data
-    //                 .values()
-    //                 .iter()
-    //                 .map(|p| p.as_ref().unwrap().1.version.timestamp)
-    //                 .collect();
-    //             return Some(out);
-    //         })
-    //         .unwrap()
-    //         .iter()
-    //         .all(|v| *v == version));
-    // }
+    fn test_packet_set_contains_version(
+        versions: &HashMap<String, Option<DataVersion>>,
+        version: u128,
+    ) {
+        println!("{:?}", versions);
+        assert!(versions
+            .values()
+            .all(|v| v.is_some() && v.unwrap().timestamp == version));
+    }
 
-    // #[test]
-    // fn test_first_synch_synchronize_returns_all_data() {
-    //     let buffer = create_test_buffer();
-    //     let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
-    //     let mut test_synch = FirstSyncSynchronizer::default();
-    //     add_data(&safe_buffer, "test1".to_string(), 1);
-    //     add_data(&safe_buffer, "test1".to_string(), 2);
-    //     add_data(&safe_buffer, "test1".to_string(), 3);
-    //     add_data(&safe_buffer, "test1".to_string(), 4);
-    //     add_data(&safe_buffer, "test1".to_string(), 5);
+    #[test]
+    fn test_first_synch_synchronize_returns_all_data() {
+        let buffer = create_test_buffer();
+        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let mut test_synch = FirstSyncSynchronizer::default();
 
-    //     // No data because the minimum versions do not match
-    //     let work_queue = Arc::new(WorkQueue::default());
-    //     test_synch.synchronize(&safe_buffer, work_queue.clone());
-    //     assert!(work_queue.steal().is_empty());
+        add_data(safe_buffer.clone(), "c1".to_string(), 1);
+        add_data(safe_buffer.clone(), "c1".to_string(), 2);
+        add_data(safe_buffer.clone(), "c1".to_string(), 3);
+        add_data(safe_buffer.clone(), "c1".to_string(), 4);
+        add_data(safe_buffer.clone(), "c1".to_string(), 5);
 
-    //     add_data(&safe_buffer, "test2".to_string(), 1);
+        // No data because the minimum versions do not match
+        let first_sync = test_synch.synchronize(safe_buffer.clone());
+        assert!(first_sync.is_none());
 
-    //     let work_queue = Arc::new(WorkQueue::default());
-    //     test_synch.synchronize(&safe_buffer, work_queue.clone());
-    //     test_packet_set_contains_version(work_queue.clone(), 1);
-    //     assert!(work_queue.steal().is_empty());
+        add_data(safe_buffer.clone(), "c2".to_string(), 1);
 
-    //     add_data(&safe_buffer, "test2".to_string(), 5);
-    //     test_synch.synchronize(&safe_buffer, work_queue.clone());
-    //     test_packet_set_contains_version(work_queue.clone(), 5);
-    //     assert!(work_queue.steal().is_empty());
-    // }
+        let synch = test_synch.synchronize(safe_buffer.clone());
+        test_packet_set_contains_version(synch.as_ref().unwrap(), 1);
+        safe_buffer
+            .lock()
+            .unwrap()
+            .get_packets_for_version(&synch.unwrap(), false);
+
+        add_data(safe_buffer.clone(), "c2".to_string(), 5);
+        let synch = test_synch.synchronize(safe_buffer.clone());
+        test_packet_set_contains_version(synch.as_ref().unwrap(), 5);
+    }
 }

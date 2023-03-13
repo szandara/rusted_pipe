@@ -6,6 +6,7 @@ use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
 use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::BufferError;
+use crate::buffers::BufferIterator;
 use crate::buffers::OrderedBuffer;
 use crate::packet::typed::PacketSetTrait;
 use crate::packet::ReadEvent;
@@ -149,6 +150,15 @@ macro_rules! read_channels {
                     default(timeout) => None,
                 };
                 Ok(has_data.is_some())
+            }
+
+            fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>> {
+                $(
+                    if channel == stringify!($T) {
+                        return Some(self.$T.buffer.iter());
+                    }
+                )+
+                None
             }
         }
 

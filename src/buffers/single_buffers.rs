@@ -16,7 +16,7 @@ pub trait FixedSizeBuffer {
 
     fn peek(&self) -> Option<&DataVersion>;
 
-    fn iter(&self) -> Box<BufferIterator<Self::Data>>;
+    fn iter(&self) -> Box<BufferIterator>;
 
     fn pop(&mut self) -> Option<Packet<Self::Data>>;
 }
@@ -77,8 +77,8 @@ impl<T: Clone> FixedSizeBuffer for RtRingBuffer<T> {
         self.buffer.dequeue()
     }
 
-    fn iter(&self) -> Box<BufferIterator<T>> {
-        Box::new(self.buffer.iter()) as Box<BufferIterator<T>>
+    fn iter(&self) -> Box<BufferIterator> {
+        Box::new(self.buffer.iter().map(|p| &p.version)) as Box<BufferIterator>
     }
 }
 
@@ -150,8 +150,8 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
         None
     }
 
-    fn iter(&self) -> Box<BufferIterator<T>> {
-        Box::new(self.data.values()) as Box<BufferIterator<T>>
+    fn iter(&self) -> Box<BufferIterator> {
+        Box::new(self.data.values().map(|p| &p.version)) as Box<BufferIterator>
     }
 }
 
