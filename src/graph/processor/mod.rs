@@ -6,9 +6,10 @@ use crate::{
         typed_write_channel::{TypedWriteChannel, Writer},
         ReadChannel,
     },
-    packet::WorkQueue,
     RustedPipeError,
 };
+
+use crate::packet::work_queue::WorkQueue;
 
 pub enum Nodes<INPUT: OutputDelivery + ChannelBuffer, OUTPUT: Writer + 'static> {
     TerminalHandler(Box<TerminalNode<INPUT>>),

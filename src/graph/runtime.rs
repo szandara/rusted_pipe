@@ -30,12 +30,10 @@ pub(super) fn read_channel_data<T: OutputDelivery>(
 ) where
     T: ChannelBuffer + 'static,
 {
-    println!("Reading read {}", id);
     let id = id.to_string();
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
         read_channel.read(id.clone(), done_notification.clone());
     }
-    println!("Terminating read {}", id);
     read_channel.stop();
 }
 
@@ -57,15 +55,13 @@ pub(super) fn consume<INPUT: OutputDelivery + ChannelBuffer + Send + 'static, OU
 
             let mut packet = None;
             if let Some(work_queue) = worker.work_queue.as_ref() {
-                let task = work_queue.steal();
-                if let Some(read_event) = task.success() {
+                let task = work_queue.get(Some(Duration::from_millis(5)));
+                if let Ok(read_event) = task {
                     packet = Some(read_event.packet_data);
                 } else {
-                    // TODO: make work_queue timeout
                     if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
                         done_notification.send(id.clone()).unwrap();
                     }
-                    thread::sleep(Duration::from_millis(5));
                     continue;
                 }
             }
@@ -91,12 +87,12 @@ pub(super) fn consume<INPUT: OutputDelivery + ChannelBuffer + Send + 'static, OU
                 match result {
                     Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
                     Err(RustedPipeError::EndOfStream()) => {
-                        println!("Terminating worker {id_thread:?}");
+                        eprintln!("Terminating worker {id_thread:?}");
                         lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
                         done_clone.send(id_thread.clone()).unwrap();
                     }
                     Err(err) => {
-                        println!("Error in worker {id_thread:?}: {err:?}");
+                        eprintln!("Error in worker {id_thread:?}: {err:?}");
                         lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
                     }
                 }
@@ -104,6 +100,7 @@ pub(super) fn consume<INPUT: OutputDelivery + ChannelBuffer + Send + 'static, OU
 
             thread_pool.spawn_ok(future);
         }
+        // Looping until the application is not shut down.
         thread::sleep(Duration::from_millis(5));
     }
 }

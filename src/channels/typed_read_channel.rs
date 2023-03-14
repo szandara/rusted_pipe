@@ -5,12 +5,9 @@ use super::ReceiverChannel;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
 use crate::buffers::synchronizers::PacketSynchronizer;
-use crate::buffers::BufferError;
 use crate::buffers::BufferIterator;
 use crate::packet::typed::PacketSetTrait;
-use crate::packet::ReadEvent;
-use crate::packet::UntypedPacket;
-use crate::packet::WorkQueue;
+use crate::packet::work_queue::{ReadEvent, WorkQueue};
 use crate::DataVersion;
 
 use crossbeam::channel::select;
@@ -285,7 +282,6 @@ impl<T: OutputDelivery + ChannelBuffer + 'static> ReadChannel<T> {
         if let Some(queue) = self.work_queue.as_ref() {
             let synch = self.synch_strategy.synchronize(self.channels.clone());
             if let Some(sync) = synch {
-                println!("{:?}", sync);
                 let value = self
                     .channels
                     .lock()
@@ -342,9 +338,6 @@ impl<T: OutputDelivery + ChannelBuffer + 'static> ReadChannel<T> {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
-
-    use crossbeam::channel::unbounded;
 
     use crate::buffers::single_buffers::RtRingBuffer;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
@@ -355,8 +348,8 @@ mod tests {
     use crate::channels::SenderChannel;
 
     use crate::packet::typed::ReadChannel2PacketSet;
+    use crate::packet::work_queue::WorkQueue;
     use crate::packet::Packet;
-    use crate::packet::WorkQueue;
     use crate::DataVersion;
 
     use super::ReadChannel2;

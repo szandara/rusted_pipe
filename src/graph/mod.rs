@@ -18,7 +18,7 @@ mod tests {
     use std::thread;
 
     use crate::channels::typed_write_channel::TypedWriteChannel;
-    use crate::packet::WorkQueue;
+    use crate::packet::work_queue::WorkQueue;
     use crate::RustedPipeError;
     use crossbeam::channel::unbounded;
     use crossbeam::channel::Receiver;
@@ -128,13 +128,14 @@ mod tests {
             input: ReadChannel2PacketSet<String, String>,
         ) -> Result<(), RustedPipeError> {
             println!(
-                "Recevied {} at {}",
+                "Received {} at {}",
                 self.counter,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Time went backwards")
                     .as_millis()
             );
+            self.counter += 1;
             self.output.send(input).unwrap();
             thread::sleep(Duration::from_millis(self.consume_time_ms));
             Ok(())
@@ -274,7 +275,7 @@ mod tests {
     #[test]
     fn test_graph_waits_for_data_if_stop_flag() {
         let max_packets = 100;
-        let mock_processing_time_ms = 3;
+        let mock_processing_time_ms = 2;
 
         let node0 = TestNodeProducer::new(
             "producer1".to_string(),
@@ -289,13 +290,12 @@ mod tests {
 
         let (mut graph, output_check) = setup_default_test(node0, node1, 10, WorkQueue::default());
 
+        // 1200ms = 12 ms * 100 packets. Receiver consume time is just approximated since the thread:sleep is not accurate and
+        // there is some computation happening inside.
+        graph.stop(true, Some(Duration::from_millis(1200)));
+
         let mut results = Vec::with_capacity(max_packets);
-        let deadline = Instant::now() + Duration::from_millis(500);
-
-        thread::sleep(Duration::from_millis(100));
-
-        graph.stop(true, Some(Duration::from_secs(1)));
-
+        let deadline = Instant::now() + Duration::from_millis(10);
         for _ in 0..max_packets {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
@@ -366,7 +366,7 @@ mod tests {
         for _i in 0..expected_versions.len() {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
-                println!("Error receiving {:?}", data.err().unwrap());
+                eprintln!("Error receiving {:?}", data.err().unwrap());
                 break;
             }
             results.push(data.unwrap());

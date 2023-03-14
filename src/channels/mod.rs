@@ -3,7 +3,7 @@ pub mod typed_read_channel;
 pub mod typed_write_channel;
 pub mod write_channel;
 
-use crossbeam::channel::{unbounded, Receiver, RecvError, Sender, TryRecvError};
+use crossbeam::channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender, TryRecvError};
 
 pub use crate::packet::{
     ChannelID, DataVersion, Packet, PacketError, PacketView, UntypedPacket, UntypedPacketCast,
@@ -26,6 +26,8 @@ pub enum ChannelError {
     TryReceiveError(#[from] TryRecvError),
     #[error(transparent)]
     ReceiveError(#[from] RecvError),
+    #[error(transparent)]
+    RecvTimeoutError(#[from] RecvTimeoutError),
     #[error("Error while sending data {0}")]
     SendError(String),
     #[error(transparent)]

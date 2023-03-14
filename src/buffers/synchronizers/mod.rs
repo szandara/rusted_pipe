@@ -6,6 +6,7 @@ use crate::DataVersion;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 pub trait PacketSynchronizer: Send {
     fn synchronize(
@@ -18,7 +19,7 @@ fn synchronize(
     ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
 ) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
-    println!("{:?}", min_version);
+
     let version = min_version.values().next().unwrap();
     if min_version.values().all(|v| v.is_some()) && min_version.values().all(|v| v == version) {
         return Some(min_version);
@@ -63,7 +64,6 @@ pub mod tests {
         versions: &HashMap<String, Option<DataVersion>>,
         version: u128,
     ) {
-        println!("{:?}", versions);
         assert!(versions
             .values()
             .all(|v| v.is_some() && v.unwrap().timestamp == version));

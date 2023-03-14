@@ -1,5 +1,5 @@
 pub mod typed;
-
+pub mod work_queue;
 use std::any::{Any, TypeId};
 use std::marker::Copy;
 
@@ -203,44 +203,6 @@ impl PacketSet {
 }
 
 unsafe impl Send for PacketSet {}
-
-pub struct ReadEvent<T> {
-    pub packet_data: T,
-}
-
-pub struct WorkQueue<T> {
-    queue: Injector<ReadEvent<T>>,
-    max_in_queue: usize,
-}
-
-impl<T> WorkQueue<T> {
-    pub fn default() -> Self {
-        WorkQueue {
-            queue: Injector::<ReadEvent<T>>::default(),
-            max_in_queue: std::usize::MAX,
-        }
-    }
-
-    pub fn new(max_in_queue: usize) -> Self {
-        WorkQueue {
-            queue: Injector::<ReadEvent<T>>::default(),
-            max_in_queue,
-        }
-    }
-
-    pub fn push(&self, packet_set: T) {
-        self.queue.push(ReadEvent {
-            packet_data: packet_set,
-        });
-        while self.queue.len() > self.max_in_queue {
-            self.queue.steal().is_success();
-        }
-    }
-
-    pub fn steal(&self) -> Steal<ReadEvent<T>> {
-        self.queue.steal()
-    }
-}
 
 #[derive(Eq, Hash, Debug, Clone)]
 pub struct ChannelID {

@@ -1,9 +1,6 @@
 use super::typed_read_channel::BufferReceiver;
 use super::typed_read_channel::ChannelBuffer;
-use super::typed_read_channel::OutputDelivery;
 use super::ChannelError;
-use super::ChannelID;
-use super::Packet;
 
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
@@ -16,13 +13,11 @@ use crate::buffers::synchronizers::PacketSynchronizer;
 
 use crossbeam::channel::Select;
 use itertools::Itertools;
-use ringbuffer::RingBuffer;
 
-use crate::packet::WorkQueue;
+use crate::packet::work_queue::WorkQueue;
 use indexmap::IndexMap;
-use std::borrow::BorrowMut;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+
+use std::sync::Arc;
 
 unsafe impl Send for UntypedBufferReceiver {}
 
@@ -32,8 +27,6 @@ pub struct UntypedBufferReceiver {
     work_queue: Option<Arc<WorkQueue<UntypedPacket>>>,
     connected_channels: Vec<String>,
 }
-
-const MAX_BUFFER_PER_CHANNEL: usize = 2000;
 
 impl UntypedBufferReceiver {
     pub fn default() -> Self {
@@ -168,9 +161,9 @@ mod tests {
     use crate::channels::ReceiverChannel;
     use crate::channels::UntypedPacket;
     use crate::channels::UntypedSenderChannel;
+    use crate::packet::work_queue::WorkQueue;
     use crate::packet::Packet;
     use crate::packet::Untyped;
-    use crate::packet::WorkQueue;
     use crate::ChannelError;
     use crate::DataVersion;
     use crossbeam::channel::TryRecvError;

@@ -19,11 +19,11 @@ use crate::{
         processor::Processors,
         runtime::{consume, read_channel_data},
     },
-    packet::WorkQueue,
     RustedPipeError,
 };
 
 use super::{processor::Nodes, runtime::Wait};
+use crate::packet::work_queue::WorkQueue;
 
 pub struct Graph {
     running: Arc<Atomic<GraphStatus>>,
@@ -81,7 +81,6 @@ impl Graph {
                 let done_channel = self.reader_empty.0.clone();
                 let id_clone = id.clone();
 
-                println!("ADDING READER");
                 self.read_threads.push((
                     id.clone(),
                     thread::spawn(move || {
@@ -121,14 +120,13 @@ impl Graph {
                 read_channel.start(work_queue.clone());
                 let done_channel = self.reader_empty.0.clone();
                 let id_clone = id.clone();
-                println!("ADDING READING THREAD {}", self.read_threads.len());
+
                 self.read_threads.push((
                     id.clone(),
                     thread::spawn(move || {
                         read_channel_data(id, reading_running_thread, read_channel, done_channel)
                     }),
                 ));
-                println!("ADDING READING THREAD {}", self.read_threads.len());
 
                 let work_queue_processor = work_queue;
                 (
