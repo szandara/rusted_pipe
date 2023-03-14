@@ -5,14 +5,12 @@ use std::{
     time::Duration,
 };
 
-use atomic::{Atomic, Ordering};
-use crossbeam::channel::{unbounded, Receiver, Sender};
-
+use crate::channels::read_channel::ReadChannelTrait;
 use crate::{
     buffers::single_buffers::FixedSizeBuffer,
     channels::{
+        read_channel::{BufferReceiver, ChannelBuffer, InputGenerator},
         typed_channel,
-        typed_read_channel::{BufferReceiver, ChannelBuffer, OutputDelivery},
         typed_write_channel::{BufferWriter, TypedWriteChannel, Writer},
     },
     graph::{
@@ -21,6 +19,8 @@ use crate::{
     },
     RustedPipeError,
 };
+use atomic::{Atomic, Ordering};
+use crossbeam::channel::{unbounded, Receiver, Sender};
 
 use super::{processor::Nodes, runtime::Wait};
 use crate::packet::work_queue::WorkQueue;
@@ -36,7 +36,7 @@ pub struct Graph {
 }
 
 pub fn link<U: Clone + 'static>(
-    read: &mut BufferReceiver<U, impl FixedSizeBuffer<Data = U>>,
+    read: &mut BufferReceiver<impl FixedSizeBuffer<Data = U>>,
     write: &mut BufferWriter<U>,
 ) -> Result<(), RustedPipeError> {
     let (channel_sender, channel_receiver) = typed_channel::<U>();
@@ -60,7 +60,7 @@ impl Graph {
     }
 
     fn get_worker<
-        INPUT: Send + OutputDelivery + ChannelBuffer + 'static,
+        INPUT: Send + InputGenerator + ChannelBuffer + 'static,
         OUTPUT: Writer + Send + 'static,
     >(
         &mut self,
@@ -143,7 +143,7 @@ impl Graph {
     }
 
     pub fn start_node<
-        INPUT: Send + OutputDelivery + ChannelBuffer + 'static,
+        INPUT: Send + InputGenerator + ChannelBuffer + 'static,
         OUTPUT: Writer + Send + 'static,
     >(
         &mut self,
@@ -230,10 +230,10 @@ impl Graph {
 }
 
 pub(super) struct ProcessorWorker<
-    INPUT: OutputDelivery + ChannelBuffer,
+    INPUT: InputGenerator + ChannelBuffer,
     OUTPUT: Writer + Send + 'static,
 > {
-    pub work_queue: Option<Arc<WorkQueue<INPUT::OUTPUT>>>,
+    pub work_queue: Option<Arc<WorkQueue<INPUT::INPUT>>>,
     pub processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
     pub write_channel: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
     pub status: Arc<Atomic<WorkerStatus>>,

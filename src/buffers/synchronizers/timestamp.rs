@@ -1,4 +1,4 @@
-use crate::{channels::typed_read_channel::ChannelBuffer, DataVersion};
+use crate::{channels::read_channel::ChannelBuffer, DataVersion};
 
 use super::{synchronize, PacketSynchronizer};
 use std::{
@@ -25,7 +25,7 @@ mod tests {
         buffers::synchronizers::tests::{
             add_data, check_packet_set_contains_version, create_test_buffer,
         },
-        channels::typed_read_channel::OutputDelivery,
+        channels::read_channel::InputGenerator,
     };
 
     #[test]

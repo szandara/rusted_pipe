@@ -1,12 +1,11 @@
 pub mod real_time;
 pub mod timestamp;
 
-use crate::channels::typed_read_channel::ChannelBuffer;
+use crate::channels::read_channel::ChannelBuffer;
 use crate::DataVersion;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 pub trait PacketSynchronizer: Send {
     fn synchronize(

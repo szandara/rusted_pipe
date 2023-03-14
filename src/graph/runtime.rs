@@ -4,17 +4,16 @@ use std::{
     time::Duration,
 };
 
-use atomic::{Atomic, Ordering};
-use crossbeam::channel::Sender;
-
+use crate::channels::{read_channel::ReadChannel, read_channel::ReadChannelTrait};
 use crate::{
     channels::{
-        typed_read_channel::{ChannelBuffer, OutputDelivery},
+        read_channel::{ChannelBuffer, InputGenerator},
         typed_write_channel::Writer,
-        ReadChannel,
     },
     RustedPipeError,
 };
+use atomic::{Atomic, Ordering};
+use crossbeam::channel::Sender;
 
 use super::{
     graph::{ProcessorWorker, WorkerStatus},
@@ -22,7 +21,7 @@ use super::{
 };
 use crate::graph::graph::GraphStatus;
 
-pub(super) fn read_channel_data<T: OutputDelivery>(
+pub(super) fn read_channel_data<T: InputGenerator + ChannelBuffer + Send>(
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     mut read_channel: ReadChannel<T>,
@@ -39,7 +38,7 @@ pub(super) fn read_channel_data<T: OutputDelivery>(
 
 pub(super) type Wait = Arc<(Mutex<WorkerStatus>, Condvar)>;
 
-pub(super) fn consume<INPUT: OutputDelivery + ChannelBuffer + Send + 'static, OUTPUT>(
+pub(super) fn consume<INPUT: InputGenerator + ChannelBuffer + Send + 'static, OUTPUT>(
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     _free: Wait,

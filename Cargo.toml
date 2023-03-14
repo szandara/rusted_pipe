@@ -38,3 +38,4 @@ log = {version = "^0.4.17"}
 downcast-rs = { version = "1.2.0", default-features = false }
 atomic = "0.5"
 casey = "^0.3.3"
+rstest = "^0.16.0"

@@ -17,6 +17,7 @@ mod tests {
 
     use std::thread;
 
+    use crate::channels::read_channel::ReadChannel;
     use crate::channels::typed_write_channel::TypedWriteChannel;
     use crate::packet::work_queue::WorkQueue;
     use crate::RustedPipeError;
@@ -31,7 +32,6 @@ mod tests {
     use crate::channels::typed_read_channel::NoBuffer;
     use crate::channels::typed_read_channel::ReadChannel2;
     use crate::channels::typed_write_channel::WriteChannel1;
-    use crate::channels::ReadChannel;
 
     use crate::packet::typed::ReadChannel2PacketSet;
     use crate::DataVersion;

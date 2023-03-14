@@ -1,7 +1,8 @@
 pub mod read_channel;
 pub mod typed_read_channel;
 pub mod typed_write_channel;
-pub mod write_channel;
+pub mod untyped_read_channel;
+pub mod untyped_write_channel;
 
 use crossbeam::channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender, TryRecvError};
 
@@ -11,8 +12,6 @@ pub use crate::packet::{
 use crate::{buffers::BufferError, packet::Untyped};
 
 use thiserror::Error;
-
-pub use typed_read_channel::ReadChannel;
 
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum ChannelError {
