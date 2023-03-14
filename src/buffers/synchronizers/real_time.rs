@@ -1,7 +1,7 @@
 use super::PacketSynchronizer;
 
 use crate::buffers::BufferIterator;
-use crate::channels::read_channel::ChannelBuffer;
+use crate::channels::typed_read_channel::ChannelBuffer;
 use crate::DataVersion;
 
 use std::collections::HashMap;
@@ -88,7 +88,7 @@ mod tests {
         buffers::synchronizers::tests::{
             add_data, check_packet_set_contains_version, create_test_buffer,
         },
-        channels::read_channel::OutputDelivery,
+        channels::typed_read_channel::OutputDelivery,
     };
 
     #[test]

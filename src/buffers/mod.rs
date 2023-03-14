@@ -4,7 +4,7 @@ pub mod synchronizers;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::channels::read_channel::OutputDelivery;
+use crate::channels::typed_read_channel::OutputDelivery;
 use crate::channels::ChannelError;
 use crate::channels::Packet;
 use crate::packet::typed::ReadChannel1PacketSet;

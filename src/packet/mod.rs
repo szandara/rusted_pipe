@@ -1,9 +1,7 @@
 pub mod typed;
 
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::marker::Copy;
-
-use std::os::raw::c_void;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,26 +46,29 @@ impl PartialEq for DataVersion {
         self.timestamp == other.timestamp
     }
 }
-
 #[derive(Debug, Copy, Clone)]
 pub struct PacketBase<T> {
     pub data: T,
     pub version: DataVersion,
 }
 
+pub type Untyped = dyn Any;
 pub type Packet<T> = PacketBase<Box<T>>;
 pub type PacketView<'a, T> = PacketBase<&'a T>;
-pub type UntypedPacket = Packet<*const c_void>;
+pub type UntypedPacket = Packet<Untyped>;
 
-pub trait UntypedPacketCast {
-    fn deref_owned<T>(self) -> Result<Packet<T>, PacketError>;
-    fn deref<T>(&self) -> Result<PacketView<T>, PacketError>;
+unsafe impl Sync for Packet<dyn Any + 'static> {}
+unsafe impl Send for Packet<dyn Any + 'static> {}
+
+pub trait UntypedPacketCast: 'static {
+    fn deref_owned<T: 'static>(self) -> Result<Packet<T>, PacketError>;
+    fn deref<T: 'static>(&self) -> Result<PacketView<T>, PacketError>;
 }
 
-impl<T: Clone> Packet<T> {
+impl<T: 'static> Packet<T> {
     pub fn to_untyped(self) -> UntypedPacket {
         UntypedPacket {
-            data: Box::new(Box::into_raw(self.data) as *const c_void),
+            data: self.data as Box<Untyped>,
             version: self.version,
         }
     }
@@ -88,16 +89,27 @@ impl<T: Clone> Packet<T> {
 }
 
 impl UntypedPacketCast for UntypedPacket {
-    fn deref_owned<T>(self) -> Result<Packet<T>, PacketError> {
-        Ok(Packet::<T> {
-            data: unsafe { Box::from_raw(*self.data as *mut T) as Box<T> },
-            version: self.version,
-        })
+    fn deref_owned<T: 'static>(mut self) -> Result<Packet<T>, PacketError> {
+        match self.data.downcast::<T>() {
+            Ok(casted_type) => Ok(Packet::<T> {
+                data: casted_type,
+                version: self.version,
+            }),
+            Err(untyped_box) => {
+                self.data = untyped_box;
+                Err(PacketError::UnexpectedDataType(TypeId::of::<T>()))
+            }
+        }
     }
 
-    fn deref<T>(&self) -> Result<PacketView<T>, PacketError> {
+    fn deref<T: 'static>(&self) -> Result<PacketView<T>, PacketError> {
+        let data_ref = self
+            .data
+            .as_ref()
+            .downcast_ref::<T>()
+            .ok_or(PacketError::UnexpectedDataType(TypeId::of::<T>()))?;
         Ok(PacketView::<T> {
-            data: unsafe { &*(*self.data as *const T) },
+            data: data_ref,
             version: self.version,
         })
     }

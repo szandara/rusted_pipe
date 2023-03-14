@@ -2,7 +2,7 @@ use std::{fmt, sync::MutexGuard};
 
 use crate::{
     channels::{
-        read_channel::{ChannelBuffer, OutputDelivery},
+        typed_read_channel::{ChannelBuffer, OutputDelivery},
         typed_write_channel::{TypedWriteChannel, Writer},
         ReadChannel,
     },

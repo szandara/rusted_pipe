@@ -9,7 +9,7 @@ use crossbeam::channel::Sender;
 
 use crate::{
     channels::{
-        read_channel::{ChannelBuffer, OutputDelivery},
+        typed_read_channel::{ChannelBuffer, OutputDelivery},
         typed_write_channel::Writer,
         ReadChannel,
     },

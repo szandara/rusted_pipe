@@ -1,7 +1,7 @@
 pub mod real_time;
 pub mod timestamp;
 
-use crate::channels::read_channel::ChannelBuffer;
+use crate::channels::typed_read_channel::ChannelBuffer;
 use crate::DataVersion;
 
 use std::collections::HashMap;
@@ -48,7 +48,7 @@ pub mod tests {
             single_buffers::{FixedSizeBuffer, RtRingBuffer},
             synchronizers::synchronize,
         },
-        channels::{read_channel::ReadChannel2, Packet},
+        channels::{typed_read_channel::ReadChannel2, Packet},
         DataVersion,
     };
 

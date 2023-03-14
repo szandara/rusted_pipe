@@ -28,8 +28,8 @@ mod tests {
 
     use crate::buffers::single_buffers::RtRingBuffer;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
-    use crate::channels::read_channel::NoBuffer;
-    use crate::channels::read_channel::ReadChannel2;
+    use crate::channels::typed_read_channel::NoBuffer;
+    use crate::channels::typed_read_channel::ReadChannel2;
     use crate::channels::typed_write_channel::WriteChannel1;
     use crate::channels::ReadChannel;
 

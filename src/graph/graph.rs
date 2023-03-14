@@ -11,8 +11,8 @@ use crossbeam::channel::{unbounded, Receiver, Sender};
 use crate::{
     buffers::single_buffers::FixedSizeBuffer,
     channels::{
-        read_channel::{BufferReceiver, ChannelBuffer, OutputDelivery},
         typed_channel,
+        typed_read_channel::{BufferReceiver, ChannelBuffer, OutputDelivery},
         typed_write_channel::{BufferWriter, TypedWriteChannel, Writer},
     },
     graph::{
@@ -35,7 +35,7 @@ pub struct Graph {
     reader_empty: (Sender<String>, Receiver<String>),
 }
 
-pub fn link<U: Clone>(
+pub fn link<U: Clone + 'static>(
     read: &mut BufferReceiver<U, impl FixedSizeBuffer<Data = U>>,
     write: &mut BufferWriter<U>,
 ) -> Result<(), RustedPipeError> {

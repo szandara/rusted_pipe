@@ -1,215 +1,392 @@
 use super::ChannelError;
-use super::UntypedReceiverChannel;
+use super::Packet;
 
+use super::ReceiverChannel;
+use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
-use crate::packet::ChannelID;
-
-use crate::packet::UntypedPacket;
-
-use crate::buffers::channel_buffers::BoundedBufferedData;
-use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
 use crate::buffers::synchronizers::PacketSynchronizer;
-
-use crate::buffers::{OrderedBuffer, PacketBufferAddress};
-use crossbeam::channel::Receiver;
-
-use itertools::Itertools;
-
+use crate::buffers::BufferError;
+use crate::buffers::BufferIterator;
+use crate::packet::typed::PacketSetTrait;
 use crate::packet::ReadEvent;
-
+use crate::packet::UntypedPacket;
 use crate::packet::WorkQueue;
-use indexmap::IndexMap;
+use crate::DataVersion;
+
+use crossbeam::channel::select;
+use crossbeam::channel::Sender;
+use paste::item;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 
-unsafe impl Send for ReadChannel {}
-
-pub struct ReadChannel {
-    buffered_data: Arc<Mutex<dyn OrderedBuffer>>,
-    synch_strategy: Box<dyn PacketSynchronizer>,
-    channels: IndexMap<ChannelID, UntypedReceiverChannel>, // Keep the channel order
-    channel_index: HashMap<ChannelID, usize>,
-    work_queue: Option<Arc<WorkQueue>>,
+pub struct BufferReceiver<U: ?Sized, T: FixedSizeBuffer<Data = U> + ?Sized> {
+    pub buffer: Box<T>,
+    pub channel: Option<ReceiverChannel<U>>,
 }
 
-unsafe impl Send for ReadEvent {}
-const MAX_BUFFER_PER_CHANNEL: usize = 2000;
+pub trait ChannelBuffer {
+    fn available_channels(&self) -> Vec<&str>;
 
-impl ReadChannel {
-    pub fn default() -> Self {
-        ReadChannel {
-            buffered_data: Arc::new(Mutex::new(BoundedBufferedData::<RtRingBuffer>::new(
-                MAX_BUFFER_PER_CHANNEL,
-                false,
-            ))),
-            synch_strategy: Box::new(TimestampSynchronizer::default()),
-            channels: Default::default(),
-            channel_index: Default::default(),
-            work_queue: None,
-        }
+    fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
+
+    fn peek(&self, channel: &str) -> Option<&DataVersion>;
+
+    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>>;
+
+    fn are_buffers_empty(&self) -> bool;
+
+    fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
+}
+
+pub struct NoBuffer {}
+
+impl OutputDelivery for NoBuffer {
+    type OUTPUT = ReadChannel1PacketSet<String>;
+
+    fn get_packets_for_version(
+        &mut self,
+        _data_versions: &HashMap<String, Option<DataVersion>>,
+        _exact_match: bool,
+    ) -> Option<Self::OUTPUT> {
+        todo!()
+    }
+}
+
+impl ChannelBuffer for NoBuffer {
+    fn available_channels(&self) -> Vec<&str> {
+        todo!()
     }
 
+    fn has_version(&self, _: &str, _: &DataVersion) -> bool {
+        todo!()
+    }
+
+    fn peek(&self, _: &str) -> Option<&DataVersion> {
+        todo!()
+    }
+
+    fn are_buffers_empty(&self) -> bool {
+        todo!()
+    }
+
+    fn try_receive(&mut self, _: Duration) -> Result<bool, ChannelError> {
+        todo!()
+    }
+
+    fn iterator(&self, _: &str) -> Option<Box<BufferIterator>> {
+        todo!()
+    }
+}
+
+impl<U, T: FixedSizeBuffer<Data = U> + ?Sized> BufferReceiver<U, T> {
+    pub fn link(&mut self, receiver: ReceiverChannel<U>) {
+        self.channel = Some(receiver);
+    }
+
+    pub fn try_read(&mut self) -> Result<DataVersion, ChannelError> {
+        if let Some(channel) = self.channel.as_ref() {
+            let packet = channel.try_receive()?;
+            let version = packet.version;
+            self.buffer.insert(packet)?;
+            return Ok(version);
+        }
+        Err(ChannelError::NotInitializedError)
+    }
+}
+
+pub struct ReadChannel<T: OutputDelivery> {
+    pub synch_strategy: Box<dyn PacketSynchronizer>,
+    pub work_queue: Option<Arc<WorkQueue<T::OUTPUT>>>,
+    pub channels: Arc<Mutex<T>>,
+}
+
+unsafe impl<T: OutputDelivery + ChannelBuffer + Send> Sync for ReadChannel<T> {}
+unsafe impl<T: OutputDelivery + ChannelBuffer + Send> Send for ReadChannel<T> {}
+
+fn get_data<T: Clone>(
+    buffer: &mut RtRingBuffer<T>,
+    data_version: &Option<DataVersion>,
+    exact_match: bool,
+) -> Option<Packet<T>> {
+    loop {
+        let removed_packet = buffer.pop();
+
+        if let Some(entry) = removed_packet {
+            if let Some(data_version) = data_version {
+                if entry.version == *data_version {
+                    return Some(entry);
+                } else if exact_match {
+                    break;
+                }
+            }
+            if exact_match {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    return None;
+}
+
+pub trait Reader {}
+
+macro_rules! read_channels {
+    ($struct_name:ident, $($T:ident),+) => {
+        item!{
+            use crate::packet::typed::[<$struct_name PacketSet>];
+            #[allow(non_camel_case_types)]
+            pub struct $struct_name<$($T: Clone),+> {
+                $(
+                    $T: BufferReceiver<$T, RtRingBuffer<$T>>,
+                )+
+            }
+        }
+
+        #[allow(non_camel_case_types)]
+        impl<$($T: Clone),+> Reader for $struct_name<$($T),+> {}
+
+        #[allow(non_camel_case_types)]
+        impl<$($T: Clone),+> ChannelBuffer for $struct_name<$($T),+> {
+            fn available_channels(&self) -> Vec<&str> {
+                vec![$(stringify!($T),)+]
+            }
+
+            fn has_version(&self, channel: &str, version: &DataVersion) -> bool {
+                $(
+                    if channel == stringify!($T) {
+                        return self.$T.buffer.get(version).is_some();
+                    }
+                )+
+                false
+            }
+
+            fn peek(&self, channel: &str) -> Option<&DataVersion> {
+                $(
+                    if channel == stringify!($T) {
+                        return self.$T.buffer.peek();
+                    }
+                )+
+                None
+            }
+
+            fn are_buffers_empty(&self) -> bool {
+                [$(
+                    self.$T.buffer.len() == 0,
+                )+].iter().all(|b| *b)
+            }
+
+            fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>{
+                let has_data = select! {
+                    $(
+                        recv(self.$T.channel
+                            .as_ref()
+                            .expect(&format!("Channel not connected {} {}",
+                                stringify!($struct_name), stringify!($T))).receiver) -> msg =>
+                                    {Some(self.$T.buffer.insert(msg?))},
+                    )+
+                    default(timeout) => None,
+                };
+                Ok(has_data.is_some())
+            }
+
+            fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>> {
+                $(
+                    if channel == stringify!($T) {
+                        return Some(self.$T.buffer.iter());
+                    }
+                )+
+                None
+            }
+        }
+
+        #[allow(non_camel_case_types, dead_code)]
+        impl<$($T: Clone),+> $struct_name<$($T),+> {
+            pub fn create($($T: RtRingBuffer<$T>),+) -> Self {
+                Self {
+                    $(
+                        $T: BufferReceiver {buffer: Box::new($T), channel: None},
+                    )+
+                }
+            }
+
+            $(
+                pub fn $T(&mut self) -> &mut BufferReceiver<$T, RtRingBuffer<$T>> {
+                    &mut self.$T
+                }
+            )+
+
+
+        }
+
+        item! {
+            #[allow(non_camel_case_types)]
+            impl<$($T: Clone),+> OutputDelivery for $struct_name<$($T),+> {
+                type OUTPUT = [<$struct_name PacketSet>]<$($T),+>;
+
+                fn get_packets_for_version(
+                    &mut self,
+                    data_versions: &HashMap<String, Option<DataVersion>>,
+                    exact_match: bool,
+                ) -> Option<Self::OUTPUT> {
+                    let mut result = [<$struct_name PacketSet>]::<$($T),+>::create();
+
+                    $(
+                        let channel = stringify!($T);
+                        let version = data_versions.get(channel).expect("Cannot find channel {channel}");
+                        let data = get_data(&mut self.$T.buffer, version, exact_match);
+                        result.[<set_ $T>](data);
+                    )+
+
+
+                    Some(result)
+                }
+            }
+        }
+    };
+}
+
+pub trait OutputDelivery {
+    type OUTPUT: PacketSetTrait + Send;
+    fn get_packets_for_version(
+        &mut self,
+        data_versions: &HashMap<String, Option<DataVersion>>,
+        exact_match: bool,
+    ) -> Option<Self::OUTPUT>;
+}
+
+read_channels!(ReadChannel1, c1);
+read_channels!(ReadChannel2, c1, c2);
+read_channels!(ReadChannel3, c1, c2, c3);
+read_channels!(ReadChannel4, c1, c2, c3, c4);
+read_channels!(ReadChannel5, c1, c2, c3, c4, c5);
+read_channels!(ReadChannel6, c1, c2, c3, c4, c5, c6);
+read_channels!(ReadChannel7, c1, c2, c3, c4, c5, c6, c7);
+read_channels!(ReadChannel8, c1, c2, c3, c4, c5, c6, c7, c8);
+
+unsafe impl<T: Send> Send for ReadEvent<T> {}
+
+impl<T: OutputDelivery + ChannelBuffer + 'static> ReadChannel<T> {
     pub fn new(
-        buffered_data: Arc<Mutex<dyn OrderedBuffer>>,
         synch_strategy: Box<dyn PacketSynchronizer>,
+        work_queue: Option<Arc<WorkQueue<T::OUTPUT>>>,
+        channels: T,
     ) -> Self {
         ReadChannel {
-            buffered_data,
             synch_strategy,
-            channels: Default::default(),
-            channel_index: Default::default(),
-            work_queue: None,
+            work_queue,
+            channels: Arc::new(Mutex::new(channels)),
         }
     }
 
-    pub fn add_channel(
-        &mut self,
-        channel_id: &ChannelID,
-        receiver: UntypedReceiverChannel,
-    ) -> Result<ChannelID, ChannelError> {
-        self.channels.insert(channel_id.clone(), receiver);
-        self.channel_index
-            .insert(channel_id.clone(), self.channels.len() - 1);
-        self.buffered_data
-            .lock()
-            .unwrap()
-            .create_channel(channel_id)?;
-        Ok(channel_id.clone())
-    }
-
-    pub fn selector<'b, 'a>(&'a self) -> Vec<Receiver<UntypedPacket>> {
-        self.channels
-            .values()
-            .into_iter()
-            .map(|rec| rec.receiver.clone())
-            .collect()
-    }
-    fn insert_packet(
-        &mut self,
-        packet: UntypedPacket,
-        channel: ChannelID,
-    ) -> Result<PacketBufferAddress, ChannelError> {
-        let packet_address = self
-            .buffered_data
-            .lock()
-            .unwrap()
-            .insert(&channel, packet)?;
-
-        if let Some(maybe_work_queue) = &self.work_queue {
-            self.synch_strategy
-                .synchronize(&mut self.buffered_data, maybe_work_queue.clone());
-            return Ok(packet_address);
+    pub fn synchronize(&mut self) {
+        if let Some(queue) = self.work_queue.as_ref() {
+            let synch = self.synch_strategy.synchronize(self.channels.clone());
+            if let Some(sync) = synch {
+                println!("{:?}", sync);
+                let value = self
+                    .channels
+                    .lock()
+                    .unwrap()
+                    .get_packets_for_version(&sync, false);
+                if let Some(value) = value {
+                    queue.push(value);
+                }
+            }
         }
-        return Err(ChannelError::NotInitializedError);
     }
 
-    pub fn try_read_index(
-        &mut self,
-        channel_index: usize,
-    ) -> Result<PacketBufferAddress, ChannelError> {
-        let (channel_id, read_channel) = self
+    pub fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool {
+        let data = self
             .channels
-            .get_index(channel_index)
-            .ok_or(ChannelError::MissingChannelIndex(channel_index))?;
-
-        let packet = read_channel.try_receive()?;
-        let channel_id = channel_id.clone();
-
-        self.insert_packet(packet, channel_id)
+            .lock()
+            .unwrap()
+            .try_receive(Duration::from_millis(10));
+        match data {
+            Ok(has_data) => {
+                if has_data {
+                    self.synchronize()
+                }
+            }
+            Err(err) => {
+                eprintln!("Exception while reading {err:?}");
+                match err {
+                    crate::channels::ChannelError::ReceiveError(_) => {
+                        if self.channels.lock().unwrap().are_buffers_empty() {
+                            done_notification.send(channel_id).unwrap();
+                        }
+                        eprintln!("Channel is disonnected, closing");
+                        return false;
+                    }
+                    _ => {
+                        eprintln!("Sending done {channel_id}");
+                        if self.channels.lock().unwrap().are_buffers_empty() {
+                            done_notification.send(channel_id).unwrap();
+                        }
+                    }
+                }
+            }
+        }
+        true
     }
 
-    pub fn try_read(&mut self, channel: &ChannelID) -> Result<PacketBufferAddress, ChannelError> {
-        let channel = channel.clone();
-
-        let packet = self
-            .channels
-            .get(&channel)
-            .ok_or(ChannelError::MissingChannel(channel.clone()))?
-            .try_receive()?;
-
-        self.insert_packet(packet, channel)
-    }
-
-    pub fn available_channels(&self) -> Vec<ChannelID> {
-        self.channels
-            .keys()
-            .into_iter()
-            .map(|key| key.clone())
-            .collect_vec()
-    }
-
-    pub fn start(&mut self, _: usize, work_queue: Arc<WorkQueue>) -> () {
+    pub fn start(&mut self, work_queue: Arc<WorkQueue<T::OUTPUT>>) {
         self.work_queue = Some(work_queue);
     }
 
-    pub fn stop(&mut self) -> () {}
-
-    pub fn are_buffers_empty(&self) -> bool {
-        self.buffered_data.lock().unwrap().are_buffers_empty()
-    }
+    pub fn stop(&mut self) {}
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::Mutex;
+    use std::time::Duration;
 
-    use crate::buffers::channel_buffers::BoundedBufferedData;
-    use crate::buffers::single_buffers::FixedSizeBTree;
+    use crossbeam::channel::unbounded;
+
+    use crate::buffers::single_buffers::RtRingBuffer;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
-    use crate::buffers::OrderedBuffer;
-    use crate::channels::untyped_channel;
-    use crate::channels::ChannelID;
+
+    use crate::channels::typed_channel;
+
     use crate::channels::ReadChannel;
-    use crate::channels::UntypedSenderChannel;
+    use crate::channels::SenderChannel;
+
+    use crate::packet::typed::ReadChannel2PacketSet;
     use crate::packet::Packet;
     use crate::packet::WorkQueue;
-    use crate::ChannelError;
     use crate::DataVersion;
-    use crossbeam::channel::TryRecvError;
 
-    fn test_read_channel() -> (ReadChannel, UntypedSenderChannel) {
-        let mut read_channel = ReadChannel::default();
-        assert_eq!(read_channel.available_channels().len(), 0);
-        let crossbeam_channels = untyped_channel();
+    use super::ReadChannel2;
+
+    fn test_read_channel() -> (
+        ReadChannel<ReadChannel2<String, String>>,
+        SenderChannel<String>,
+    ) {
+        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let read_channel2 = ReadChannel2::create(
+            RtRingBuffer::<String>::new(2, true),
+            RtRingBuffer::<String>::new(2, true),
+        );
+        let read_channel = ReadChannel::new(
+            synch_strategy,
+            Some(Arc::new(WorkQueue::default())),
+            read_channel2,
+        );
+
+        let (channel_sender, channel_receiver) = typed_channel::<String>();
         read_channel
-            .add_channel(&ChannelID::from("test_channel_1"), crossbeam_channels.1)
-            .unwrap();
+            .channels
+            .lock()
+            .unwrap()
+            .c1()
+            .link(channel_receiver);
 
-        (read_channel, crossbeam_channels.0)
+        (read_channel, channel_sender)
     }
 
-    #[test]
-    fn test_read_channel_add_channel_maintains_order_in_keys() {
-        let mut read_channel = test_read_channel().0;
-        assert_eq!(read_channel.available_channels().len(), 1);
-        assert_eq!(
-            read_channel.available_channels(),
-            vec![ChannelID::from("test_channel_1")]
-        );
-
-        let crossbeam_channels = untyped_channel();
-        read_channel
-            .add_channel(&ChannelID::from("test3"), crossbeam_channels.1)
-            .unwrap();
-        assert_eq!(read_channel.available_channels().len(), 2);
-        assert_eq!(
-            read_channel.available_channels(),
-            vec![ChannelID::from("test_channel_1"), ChannelID::from("test3")]
-        );
-    }
-
-    #[test]
-    fn test_read_channel_try_read_returns_error_if_no_data() {
-        let (mut read_channel, _) = test_read_channel();
-        assert_eq!(
-            read_channel
-                .try_read(&ChannelID::from("test_channel_1"))
-                .err()
-                .unwrap(),
-            ChannelError::ReceiveError(TryRecvError::Disconnected)
-        );
-    }
     #[test]
     fn test_read_channel_try_read_returns_ok_if_data() {
         let (mut read_channel, crossbeam_channels) = test_read_channel();
@@ -219,103 +396,101 @@ mod tests {
                 DataVersion { timestamp: 1 },
             ))
             .unwrap();
-        read_channel.start(0, Arc::new(WorkQueue::default()));
+        read_channel.start(Arc::new(WorkQueue::default()));
         assert_eq!(
             read_channel
-                .try_read(&ChannelID::from("test_channel_1"))
+                .channels
+                .lock()
+                .unwrap()
+                .c1()
+                .try_read()
                 .ok()
                 .unwrap(),
-            (
-                ChannelID::from("test_channel_1"),
-                DataVersion { timestamp: 1 }
-            )
-        );
-    }
-    #[test]
-    fn test_read_channel_try_read_returns_error_if_no_channel() {
-        let mut read_channel = test_read_channel().0;
-        assert_eq!(
-            read_channel
-                .try_read(&ChannelID::from("test_fake"))
-                .err()
-                .unwrap(),
-            ChannelError::MissingChannel(ChannelID::from("test_fake"))
+            DataVersion { timestamp: 1 }
         );
     }
 
     #[test]
     fn test_read_channel_try_read_returns_error_when_push_if_not_initialized() {
-        let (mut read_channel, _) = test_read_channel();
+        let (read_channel, _) = test_read_channel();
         assert!(read_channel
-            .try_read(&ChannelID::from("test_channel_1"))
+            .channels
+            .lock()
+            .unwrap()
+            .c1()
+            .try_read()
+            .is_err());
+        assert!(read_channel
+            .channels
+            .lock()
+            .unwrap()
+            .c2()
+            .try_read()
             .is_err());
     }
 
     #[test]
     fn test_read_channel_try_read_returns_error_when_buffer_is_full() {
-        let buffered_data = Arc::new(Mutex::new(BoundedBufferedData::<FixedSizeBTree>::new(
-            2, true,
-        )));
         let synch_strategy = Box::new(TimestampSynchronizer::default());
-        let mut read_channel = ReadChannel::new(buffered_data, synch_strategy);
+        let read_channel2 = ReadChannel2::create(
+            RtRingBuffer::<String>::new(2, true),
+            RtRingBuffer::<String>::new(2, true),
+        );
+        let mut read_channel = ReadChannel::new(
+            synch_strategy,
+            Some(Arc::new(
+                WorkQueue::<ReadChannel2PacketSet<String, String>>::default(),
+            )),
+            read_channel2,
+        );
 
-        for i in 0..2 {
-            let crossbeam_channels = untyped_channel();
-            let channel = &ChannelID::from(format!("test{}", i).as_str());
-            read_channel
-                .add_channel(channel, crossbeam_channels.1)
-                .unwrap();
-        }
+        let (s1, channel_receiver) = typed_channel::<String>();
+        read_channel
+            .channels
+            .lock()
+            .unwrap()
+            .c1()
+            .link(channel_receiver);
 
-        let channel = &ChannelID::from("test0");
+        let (_, channel_receiver) = typed_channel::<String>();
+        read_channel
+            .channels
+            .lock()
+            .unwrap()
+            .c2()
+            .link(channel_receiver);
+
         let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp: 1 });
 
-        read_channel.start(100, Arc::new(WorkQueue::default()));
-        read_channel
-            .insert_packet(packet.clone().to_untyped(), channel.clone())
-            .unwrap();
+        read_channel.start(Arc::new(WorkQueue::default()));
+        s1.send(packet.clone()).unwrap();
+
         packet.version.timestamp = 2;
-        read_channel
-            .insert_packet(packet.clone().to_untyped(), channel.clone())
-            .unwrap();
+        s1.send(packet.clone()).unwrap();
+
         packet.version.timestamp = 3;
+        s1.send(packet.clone()).unwrap();
+        //assert!(read_channel.read("c1".to_string(), done.0));
         assert!(read_channel
-            .insert_packet(packet.clone().to_untyped(), channel.clone())
-            .is_err());
-    }
-
-    #[test]
-    fn test_read_channel_fails_if_channel_not_added() {
-        let buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
-        let safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
-
-        let packet = Packet::<String> {
-            data: Box::new("data".to_string()),
-            version: DataVersion { timestamp: 0 },
-        };
-
-        safe_buffer
+            .channels
             .lock()
             .unwrap()
-            .create_channel(&ChannelID::new("test1".to_string()))
-            .unwrap();
-
-        assert!(safe_buffer
-            .lock()
-            .unwrap()
-            .insert(
-                &ChannelID::new("test1".to_string()),
-                packet.clone().to_untyped(),
-            )
+            .c1()
+            .try_read()
             .is_ok());
-
-        assert!(safe_buffer
+        assert!(read_channel
+            .channels
             .lock()
             .unwrap()
-            .insert(
-                &ChannelID::new("test3".to_string()),
-                packet.clone().to_untyped(),
-            )
+            .c1()
+            .try_read()
+            .is_ok());
+        assert!(read_channel
+            .channels
+            .lock()
+            .unwrap()
+            .c1()
+            .try_read()
             .is_err());
     }
 }

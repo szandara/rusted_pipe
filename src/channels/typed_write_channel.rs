@@ -12,7 +12,7 @@ pub struct BufferWriter<U> {
     pub channels: Vec<SenderChannel<U>>,
 }
 
-impl<U: Clone> BufferWriter<U> {
+impl<U: Clone + 'static> BufferWriter<U> {
     pub fn default() -> Self {
         Self { channels: vec![] }
     }
@@ -30,7 +30,7 @@ impl<U: Clone> BufferWriter<U> {
 macro_rules! write_channels {
     ($struct_name:ident, $($T:ident),+) => {
         #[allow(non_camel_case_types)]
-       pub struct $struct_name<$($T: Clone),+> {
+       pub struct $struct_name<$($T: Clone + 'static),+> {
             $(
                 $T: BufferWriter<$T>,
             )+
