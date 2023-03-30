@@ -49,8 +49,6 @@ pub struct Packet<T> {
 }
 
 pub type Untyped = dyn Any;
-//pub type Packet<T> = PacketBase<Box<T>>;
-pub type PacketView<'a, T> = Packet<&'a T>;
 pub type UntypedPacket = Packet<Box<Untyped>>;
 
 pub trait UntypedPacketCast: 'static {

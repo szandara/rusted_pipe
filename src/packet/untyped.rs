@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::PacketError;
 
-use super::{typed::PacketSetTrait, Packet, PacketView, UntypedPacket, UntypedPacketCast};
+use super::{typed::PacketSetTrait, Packet, UntypedPacket, UntypedPacketCast};
 
 impl UntypedPacketCast for UntypedPacket {
     fn deref_owned<T: 'static>(mut self) -> Result<Packet<Box<T>>, PacketError> {

@@ -7,7 +7,7 @@ pub mod untyped_write_channel;
 use crossbeam::channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender, TryRecvError};
 
 pub use crate::packet::{
-    ChannelID, DataVersion, Packet, PacketError, PacketView, UntypedPacket, UntypedPacketCast,
+    ChannelID, DataVersion, Packet, PacketError, UntypedPacket, UntypedPacketCast,
 };
 use crate::{buffers::BufferError, packet::Untyped};
 
