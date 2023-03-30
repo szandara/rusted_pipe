@@ -155,7 +155,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
     }
 }
 
-pub fn get_data<T: ?Sized>(
+pub fn get_data<T>(
     buffer: &mut RtRingBuffer<T>,
     data_version: &Option<DataVersion>,
     exact_match: bool,
@@ -232,16 +232,17 @@ mod tests {
     }
 
     fn create_untyped_buffer(
-        channel: ReceiverChannel<Untyped>,
-    ) -> BufferReceiver<RtRingBuffer<Untyped>> {
-        let buffer = RtRingBuffer::<Untyped>::new(2, true);
+        channel: ReceiverChannel<Box<Untyped>>,
+    ) -> BufferReceiver<RtRingBuffer<Box<Untyped>>> {
+        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true);
         BufferReceiver {
             buffer: Box::new(buffer),
             channel: Some(channel),
         }
     }
 
-    fn create_untyped_read_channel() -> (ReadChannel<UntypedReadChannel>, SenderChannel<Untyped>) {
+    fn create_untyped_read_channel(
+    ) -> (ReadChannel<UntypedReadChannel>, SenderChannel<Box<Untyped>>) {
         let synch_strategy = Box::new(TimestampSynchronizer::default());
         let read_channel2 = UntypedReadChannel::default();
         let read_channel = ReadChannel::new(

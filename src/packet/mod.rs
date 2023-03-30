@@ -43,41 +43,30 @@ impl PartialEq for DataVersion {
     }
 }
 #[derive(Debug, Copy, Clone)]
-pub struct PacketBase<T> {
+pub struct Packet<T> {
     pub data: T,
     pub version: DataVersion,
 }
 
 pub type Untyped = dyn Any;
-pub type Packet<T> = PacketBase<Box<T>>;
-pub type PacketView<'a, T> = PacketBase<&'a T>;
-pub type UntypedPacket = Packet<Untyped>;
+//pub type Packet<T> = PacketBase<Box<T>>;
+pub type PacketView<'a, T> = Packet<&'a T>;
+pub type UntypedPacket = Packet<Box<Untyped>>;
 
 pub trait UntypedPacketCast: 'static {
-    fn deref_owned<T: 'static>(self) -> Result<Packet<T>, PacketError>;
-    fn deref<T: 'static>(&self) -> Result<PacketView<T>, PacketError>;
+    fn deref_owned<T: 'static>(self) -> Result<Packet<Box<T>>, PacketError>;
 }
 
 impl<T: 'static> Packet<T> {
     pub fn to_untyped(self) -> UntypedPacket {
         UntypedPacket {
-            data: self.data as Box<Untyped>,
+            data: Box::new(self.data) as Box<Untyped>,
             version: self.version,
         }
     }
 
     pub fn new(data: T, version: DataVersion) -> Self {
-        Packet::<T> {
-            data: Box::new(data),
-            version,
-        }
-    }
-
-    pub fn view(&self) -> PacketView<T> {
-        PacketView::<T> {
-            data: self.data.as_ref(),
-            version: self.version,
-        }
+        Packet::<T> { data, version }
     }
 }
 

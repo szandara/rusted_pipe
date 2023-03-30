@@ -4,7 +4,7 @@ use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, Rin
 type _RingBuffer<T> = AllocRingBuffer<Packet<T>>;
 
 pub trait FixedSizeBuffer {
-    type Data: ?Sized;
+    type Data;
 
     fn contains_key(&self, version: &DataVersion) -> bool;
 
@@ -31,12 +31,12 @@ pub trait FixedSizeBuffer {
 }
 
 #[derive(Default)]
-pub struct RtRingBuffer<T: ?Sized> {
+pub struct RtRingBuffer<T> {
     buffer: _RingBuffer<T>,
     block_full: bool,
 }
 
-impl<T: ?Sized> RtRingBuffer<T> {
+impl<T> RtRingBuffer<T> {
     pub fn find_version(&self, version: &DataVersion) -> Option<&Packet<T>> {
         self.buffer.iter().find(|packet| packet.version == *version)
     }
@@ -52,7 +52,7 @@ impl<T: ?Sized> RtRingBuffer<T> {
     }
 }
 
-impl<T: ?Sized> FixedSizeBuffer for RtRingBuffer<T> {
+impl<T> FixedSizeBuffer for RtRingBuffer<T> {
     type Data = T;
 
     fn contains_key(&self, version: &DataVersion) -> bool {

@@ -55,15 +55,15 @@ pub fn typed_channel<T>() -> (SenderChannel<T>, ReceiverChannel<T>) {
     )
 }
 
-pub type UntypedReceiverChannel = ReceiverChannel<Untyped>;
-pub type UntypedSenderChannel = SenderChannel<Untyped>;
+pub type UntypedReceiverChannel = ReceiverChannel<Box<Untyped>>;
+pub type UntypedSenderChannel = SenderChannel<Box<Untyped>>;
 
 #[derive(Debug)]
-pub struct ReceiverChannel<T: ?Sized> {
+pub struct ReceiverChannel<T> {
     pub receiver: Receiver<Packet<T>>,
 }
 
-impl<T: ?Sized> ReceiverChannel<T> {
+impl<T> ReceiverChannel<T> {
     pub fn new(receiver: &Receiver<Packet<T>>) -> Self {
         Self {
             receiver: receiver.clone(),
@@ -78,11 +78,11 @@ impl<T: ?Sized> ReceiverChannel<T> {
 }
 
 #[derive(Debug)]
-pub struct SenderChannel<T: ?Sized> {
+pub struct SenderChannel<T> {
     sender: Sender<Packet<T>>,
 }
 
-impl<T: ?Sized> SenderChannel<T> {
+impl<T> SenderChannel<T> {
     pub fn new(sender: &Sender<Packet<T>>) -> Self {
         Self {
             sender: sender.clone(),

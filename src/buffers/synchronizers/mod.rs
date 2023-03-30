@@ -74,7 +74,7 @@ pub mod tests {
         version_timestamp: u128,
     ) {
         let packet = Packet::<String> {
-            data: Box::new("data".to_string()),
+            data: "data".to_string(),
             version: DataVersion {
                 timestamp: version_timestamp,
             },

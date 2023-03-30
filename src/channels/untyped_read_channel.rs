@@ -22,7 +22,7 @@ use indexmap::IndexMap;
 unsafe impl Send for UntypedReadChannel {}
 
 pub struct UntypedReadChannel {
-    buffered_data: IndexMap<String, BufferReceiver<RtRingBuffer<Untyped>>>,
+    buffered_data: IndexMap<String, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
     connected_channels: Vec<String>,
 }
 
@@ -34,7 +34,9 @@ impl UntypedReadChannel {
         }
     }
 
-    pub fn new(buffered_data: IndexMap<String, BufferReceiver<RtRingBuffer<Untyped>>>) -> Self {
+    pub fn new(
+        buffered_data: IndexMap<String, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
+    ) -> Self {
         UntypedReadChannel {
             buffered_data,
             connected_channels: vec![],
@@ -44,20 +46,23 @@ impl UntypedReadChannel {
     pub fn add_channel(
         &mut self,
         channel: String,
-        receiver: BufferReceiver<RtRingBuffer<Untyped>>,
+        receiver: BufferReceiver<RtRingBuffer<Box<Untyped>>>,
     ) -> Result<String, ChannelError> {
         self.buffered_data.insert(channel.clone(), receiver);
         Ok(channel)
     }
 
-    pub fn get_channel(&self, channel: &str) -> Option<&BufferReceiver<RtRingBuffer<Untyped>>> {
+    pub fn get_channel(
+        &self,
+        channel: &str,
+    ) -> Option<&BufferReceiver<RtRingBuffer<Box<Untyped>>>> {
         self.buffered_data.get(channel)
     }
 
     pub fn get_channel_mut(
         &mut self,
         channel: &str,
-    ) -> Option<&mut BufferReceiver<RtRingBuffer<Untyped>>> {
+    ) -> Option<&mut BufferReceiver<RtRingBuffer<Box<Untyped>>>> {
         self.buffered_data.get_mut(channel)
     }
 
@@ -185,8 +190,10 @@ mod tests {
     use crate::DataVersion;
     use crossbeam::channel::TryRecvError;
 
-    fn create_buffer(channel: ReceiverChannel<Untyped>) -> BufferReceiver<RtRingBuffer<Untyped>> {
-        let buffer = RtRingBuffer::<Untyped>::new(2, true);
+    fn create_buffer(
+        channel: ReceiverChannel<Box<Untyped>>,
+    ) -> BufferReceiver<RtRingBuffer<Box<Untyped>>> {
+        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true);
         BufferReceiver {
             buffer: Box::new(buffer),
             channel: Some(channel),
