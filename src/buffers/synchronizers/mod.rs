@@ -1,27 +1,24 @@
-pub mod first_sync;
+pub mod real_time;
 pub mod timestamp;
 
-use crate::buffers::OrderedBuffer;
-use crate::packet::ChannelID;
+use crate::channels::read_channel::ChannelBuffer;
 use crate::DataVersion;
 
-use crate::packet::PacketSet;
-use crate::packet::WorkQueue;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub trait PacketSynchronizer: Send {
     fn synchronize(
         &mut self,
-        ordered_buffer: &Arc<Mutex<dyn OrderedBuffer>>,
-        work_queue: Arc<WorkQueue>,
-    );
+        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+    ) -> Option<HashMap<String, Option<DataVersion>>>;
 }
 
 fn synchronize(
-    ordered_buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
+    ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
+
     let version = min_version.values().next().unwrap();
     if min_version.values().all(|v| v.is_some()) && min_version.values().all(|v| v == version) {
         return Some(min_version);
@@ -29,122 +26,88 @@ fn synchronize(
     None
 }
 
-fn get_min_versions(
-    buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-) -> HashMap<ChannelID, Option<DataVersion>> {
+fn get_min_versions(buffer: Arc<Mutex<dyn ChannelBuffer>>) -> HashMap<String, Option<DataVersion>> {
     let buffer = buffer.lock().unwrap();
-    let mut out_map = HashMap::<ChannelID, Option<DataVersion>>::default();
+    let mut out_map = HashMap::<String, Option<DataVersion>>::default();
 
     for channel in buffer.available_channels().iter() {
-        out_map.insert(channel.clone(), buffer.peek(&channel).cloned());
+        out_map.insert(channel.to_string(), buffer.peek(channel).cloned());
     }
-    return out_map;
-}
-
-fn get_packets_for_version(
-    data_versions: &HashMap<ChannelID, Option<DataVersion>>,
-    buffer: &mut Arc<Mutex<dyn OrderedBuffer>>,
-    exact_match: bool,
-) -> Option<PacketSet> {
-    let mut buffer_locked = buffer.lock().unwrap();
-    let mut valid_counter = 0;
-
-    let packet_set = data_versions
-        .iter()
-        .map(|(channel_id, data_version)| {
-            loop {
-                let removed_packet = buffer_locked.pop(channel_id);
-                if removed_packet.is_err() {
-                    eprintln!(
-                        "Error while reading data {}",
-                        removed_packet.as_ref().err().unwrap()
-                    );
-                    break;
-                }
-                if let Some(entry) = removed_packet.unwrap() {
-                    if let Some(data_version) = data_version {
-                        if entry.version == *data_version {
-                            valid_counter += 1;
-                            return (
-                                channel_id.clone(),
-                                Some(((channel_id.clone(), data_version.clone()), entry)),
-                            );
-                        } else {
-                            if exact_match {
-                                break;
-                            }
-                        }
-                    }
-                    if exact_match {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-            }
-            return (channel_id.clone(), None);
-        })
-        .collect();
-
-    if valid_counter != buffer_locked.available_channels().len() {
-        eprintln!(
-            "Found mismatched entries when generating packet set for {:?}. Skipping.",
-            data_versions
-        );
-        return None;
-    }
-    Some(PacketSet::new(packet_set))
+    out_map
 }
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
-    use crate::buffers::channel_buffers::BoundedBufferedData;
-    use crate::buffers::single_buffers::FixedSizeBTree;
-    use crate::buffers::DataBuffer;
-    use crate::channels::{ChannelID, Packet};
-    use crate::DataVersion;
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Mutex},
+    };
 
-    pub fn create_test_buffer() -> BoundedBufferedData<FixedSizeBTree> {
-        let mut buffer = BoundedBufferedData::<FixedSizeBTree>::new(100, false);
+    use crate::{
+        buffers::{
+            single_buffers::{FixedSizeBuffer, RtRingBuffer},
+            synchronizers::synchronize,
+        },
+        channels::{typed_read_channel::ReadChannel2, Packet},
+        DataVersion,
+    };
 
-        buffer
-            .create_channel(&ChannelID::new("test1".to_string()))
-            .unwrap();
-        buffer
-            .create_channel(&ChannelID::new("test2".to_string()))
-            .unwrap();
-        return buffer;
+    pub fn create_test_buffer() -> ReadChannel2<String, String> {
+        ReadChannel2::create(
+            RtRingBuffer::<String>::new(100, false),
+            RtRingBuffer::<String>::new(100, false),
+        )
+    }
+
+    pub fn check_packet_set_contains_version(
+        versions: &HashMap<String, Option<DataVersion>>,
+        version: u128,
+    ) {
+        assert!(versions
+            .values()
+            .all(|v| v.is_some() && v.unwrap().timestamp == version));
     }
 
     pub fn add_data(
-        buffer: &Arc<Mutex<dyn OrderedBuffer>>,
+        buffer: Arc<Mutex<ReadChannel2<String, String>>>,
         channel_id: String,
         version_timestamp: u128,
     ) {
         let packet = Packet::<String> {
-            data: Box::new("data".to_string()),
+            data: "data".to_string(),
             version: DataVersion {
                 timestamp: version_timestamp,
             },
         };
-
-        buffer
-            .lock()
-            .unwrap()
-            .insert(&ChannelID::new(channel_id), packet.clone().to_untyped())
-            .unwrap();
+        if channel_id == "c1" {
+            buffer
+                .lock()
+                .unwrap()
+                .c1()
+                .buffer
+                .insert(packet.clone())
+                .unwrap();
+        } else if channel_id == "c2" {
+            buffer
+                .lock()
+                .unwrap()
+                .c2()
+                .buffer
+                .insert(packet.clone())
+                .unwrap();
+        }
     }
 
     #[test]
     fn test_timestamp_synchronize_is_none_if_no_data_on_channel() {
         let buffer = create_test_buffer();
-        let mut safe_buffer: Arc<Mutex<dyn OrderedBuffer>> = Arc::new(Mutex::new(buffer));
 
-        add_data(&safe_buffer, "test1".to_string(), 2);
-        add_data(&safe_buffer, "test1".to_string(), 3);
+        let safe_buffer = Arc::new(Mutex::new(buffer));
 
-        let packet_set = synchronize(&mut safe_buffer);
+        add_data(safe_buffer.clone(), "c1".to_string(), 2);
+        add_data(safe_buffer.clone(), "c1".to_string(), 3);
+
+        let packet_set = synchronize(safe_buffer.clone());
         assert!(packet_set.is_none());
     }
 }

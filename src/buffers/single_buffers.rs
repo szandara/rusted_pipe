@@ -1,17 +1,16 @@
-use crate::channels::UntypedPacket;
-use crate::DataVersion;
+use crate::{channels::Packet, DataVersion};
 use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, RingBufferWrite};
 
-type _RingBuffer = AllocRingBuffer<UntypedPacket>;
+type _RingBuffer<T> = AllocRingBuffer<Packet<T>>;
 
 pub trait FixedSizeBuffer {
-    fn new(max_size: usize, block_full: bool) -> Self;
+    type Data;
 
     fn contains_key(&self, version: &DataVersion) -> bool;
 
-    fn get(&self, version: &DataVersion) -> Option<&UntypedPacket>;
+    fn get(&self, version: &DataVersion) -> Option<&Packet<Self::Data>>;
 
-    fn insert(&mut self, version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError>;
+    fn insert(&mut self, packet: Packet<Self::Data>) -> Result<(), BufferError>;
 
     fn len(&self) -> usize;
 
@@ -19,40 +18,53 @@ pub trait FixedSizeBuffer {
 
     fn iter(&self) -> Box<BufferIterator>;
 
-    fn pop(&mut self) -> Option<UntypedPacket>;
+    fn pop(&mut self) -> Option<Packet<Self::Data>>;
+
+    fn check_order(&self, version: u128) -> Result<(), BufferError> {
+        if let Some(p) = self.peek() {
+            if version <= p.timestamp {
+                return Err(BufferError::OutOfOrder(version, p.timestamp));
+            }
+        }
+        Ok(())
+    }
 }
 
-pub struct RtRingBuffer {
-    buffer: _RingBuffer,
+#[derive(Default)]
+pub struct RtRingBuffer<T> {
+    buffer: _RingBuffer<T>,
     block_full: bool,
 }
 
-impl RtRingBuffer {
-    pub fn find_version(&self, version: &DataVersion) -> Option<&UntypedPacket> {
+impl<T> RtRingBuffer<T> {
+    pub fn find_version(&self, version: &DataVersion) -> Option<&Packet<T>> {
         self.buffer.iter().find(|packet| packet.version == *version)
+    }
+
+    pub fn new(mut max_size: usize, block_full: bool) -> Self {
+        if !max_size.is_power_of_two() {
+            max_size = 2_usize.pow(max_size.ilog2() / 2_usize.ilog2() + 1);
+        }
+        RtRingBuffer {
+            buffer: _RingBuffer::with_capacity(max_size),
+            block_full,
+        }
     }
 }
 
-impl FixedSizeBuffer for RtRingBuffer {
-    fn new(mut max_size: usize, block_full: bool) -> Self {
-        if !max_size.is_power_of_two() {
-            max_size = (2 as usize).pow(max_size.ilog2() / (2 as usize).ilog2() + 1);
-        }
-        return RtRingBuffer {
-            buffer: _RingBuffer::with_capacity(max_size),
-            block_full,
-        };
-    }
+impl<T> FixedSizeBuffer for RtRingBuffer<T> {
+    type Data = T;
 
     fn contains_key(&self, version: &DataVersion) -> bool {
         self.find_version(version).is_some()
     }
 
-    fn get(&self, version: &DataVersion) -> Option<&UntypedPacket> {
+    fn get(&self, version: &DataVersion) -> Option<&Packet<T>> {
         self.find_version(version)
     }
 
-    fn insert(&mut self, _version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError> {
+    fn insert(&mut self, packet: Packet<T>) -> Result<(), BufferError> {
+        self.check_order(packet.version.timestamp)?;
         if self.block_full && self.buffer.is_full() {
             return Err(BufferError::BufferFull);
         }
@@ -71,12 +83,12 @@ impl FixedSizeBuffer for RtRingBuffer {
         None
     }
 
-    fn pop(&mut self) -> Option<UntypedPacket> {
+    fn pop(&mut self) -> Option<Packet<T>> {
         self.buffer.dequeue()
     }
 
     fn iter(&self) -> Box<BufferIterator> {
-        Box::new(self.buffer.iter()) as Box<BufferIterator>
+        Box::new(self.buffer.iter().map(|p| &p.version)) as Box<BufferIterator>
     }
 }
 
@@ -84,13 +96,13 @@ use std::collections::BTreeMap;
 
 use super::{BufferError, BufferIterator};
 
-pub struct FixedSizeBTree {
-    data: BTreeMap<DataVersion, UntypedPacket>,
+pub struct FixedSizeBTree<T> {
+    data: BTreeMap<DataVersion, Packet<T>>,
     max_size: usize,
     block_full: bool,
 }
 
-impl FixedSizeBTree {
+impl<T> FixedSizeBTree<T> {
     pub fn default() -> Self {
         FixedSizeBTree {
             data: Default::default(),
@@ -98,37 +110,41 @@ impl FixedSizeBTree {
             block_full: false,
         }
     }
-}
 
-impl FixedSizeBuffer for FixedSizeBTree {
-    fn new(max_size: usize, block_full: bool) -> Self {
+    pub fn new(max_size: usize, block_full: bool) -> Self {
         FixedSizeBTree {
             data: Default::default(),
             max_size,
             block_full,
         }
     }
+}
+
+impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
+    type Data = T;
+
     fn contains_key(&self, version: &DataVersion) -> bool {
         self.data.contains_key(version)
     }
 
-    fn get(&self, version: &DataVersion) -> Option<&UntypedPacket> {
+    fn get(&self, version: &DataVersion) -> Option<&Packet<T>> {
         self.data.get(version)
     }
 
-    fn insert(&mut self, version: DataVersion, packet: UntypedPacket) -> Result<(), BufferError> {
+    fn insert(&mut self, packet: Packet<T>) -> Result<(), BufferError> {
+        self.check_order(packet.version.timestamp)?;
         while self.data.len() >= self.max_size {
             if self.block_full {
                 return Err(BufferError::BufferFull);
             }
             self.data.pop_first();
         }
-        self.data.insert(version, packet);
+        self.data.insert(packet.version, packet);
         Ok(())
     }
 
     fn len(&self) -> usize {
-        return self.data.len();
+        self.data.len()
     }
 
     fn peek(&self) -> Option<&DataVersion> {
@@ -138,7 +154,7 @@ impl FixedSizeBuffer for FixedSizeBTree {
         }
     }
 
-    fn pop(&mut self) -> Option<UntypedPacket> {
+    fn pop(&mut self) -> Option<Packet<T>> {
         if let Some(value) = self.data.pop_first() {
             return Some(value.1);
         }
@@ -146,7 +162,7 @@ impl FixedSizeBuffer for FixedSizeBTree {
     }
 
     fn iter(&self) -> Box<BufferIterator> {
-        Box::new(self.data.values().clone()) as Box<BufferIterator>
+        Box::new(self.data.values().map(|p| &p.version)) as Box<BufferIterator>
     }
 }
 
@@ -154,40 +170,54 @@ impl FixedSizeBuffer for FixedSizeBTree {
 mod fixed_size_buffer_tests {
     use super::*;
     use crate::channels::Packet;
-    use crate::packet::UntypedPacketCast;
 
     macro_rules! param_test {
         ($($type:ident)*) => {
         $(
             paste::item! {
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_inserts_and_drops_data_if_past_capacity _ $type >] () {
-                    test_buffer_inserts_and_drops_data_if_past_capacity::<$type>();
+                    let buffer = $type::new(32, false);
+                    test_buffer_inserts_and_drops_data_if_past_capacity::<$type<String>>(buffer);
                 }
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_contains_key_returns_expected _ $type >] () {
-                    test_buffer_contains_key_returns_expected::<$type>();
+                    let buffer = $type::new(2, false);
+                    test_buffer_contains_key_returns_expected::<$type<String>>(buffer);
                 }
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_get_returns_expected_data _ $type >] () {
-                    test_buffer_get_returns_expected_data::<$type>();
+                    let buffer = $type::new(2, false);
+                    test_buffer_get_returns_expected_data::<$type<String>>(buffer);
                 }
                 #[test]
+                #[allow(non_snake_case)]
                 fn [< test_buffer_insert_returns_errr_if_full_and_block _ $type >] () {
-                    test_buffer_insert_returns_errr_if_full_and_block::<$type>();
+                    let buffer = $type::new(2, true);
+                    test_buffer_insert_returns_errr_if_full_and_block::<$type<String>>(buffer);
+                }
+                #[test]
+                #[allow(non_snake_case)]
+                fn [< test_buffer_returns_error_if_data_out_of_order _ $type >] () {
+                    let buffer = $type::new(3, true);
+                    test_buffer_returns_error_if_data_out_of_order::<$type<String>>(buffer);
                 }
             }
         )*
         }
     }
 
-    fn test_buffer_inserts_and_drops_data_if_past_capacity<T: FixedSizeBuffer>() {
+    fn test_buffer_inserts_and_drops_data_if_past_capacity<T: FixedSizeBuffer<Data = String>>(
+        mut buffer: T,
+    ) {
         let max_size = 32;
-        let mut buffer = T::new(max_size, false);
         for i in 0..(max_size + 10) as u128 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped()).unwrap();
+            buffer.insert(packet).unwrap();
             if i >= max_size as u128 {
                 assert_eq!(buffer.peek().unwrap().timestamp, (i - max_size as u128) + 1);
             } else {
@@ -196,41 +226,49 @@ mod fixed_size_buffer_tests {
         }
     }
 
-    fn test_buffer_contains_key_returns_expected<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(2, false);
+    fn test_buffer_contains_key_returns_expected<T: FixedSizeBuffer<Data = String>>(mut buffer: T) {
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new("test".to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped()).unwrap();
+            buffer.insert(packet).unwrap();
             assert!(buffer.contains_key(&DataVersion { timestamp: i }));
         }
         assert!(!buffer.contains_key(&DataVersion { timestamp: 0 }));
     }
 
-    fn test_buffer_get_returns_expected_data<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(2, false);
+    fn test_buffer_returns_error_if_data_out_of_order<T: FixedSizeBuffer<Data = String>>(
+        mut buffer: T,
+    ) {
+        let version = DataVersion { timestamp: 1 };
+        let packet = Packet::<String>::new("test".to_string(), version.clone());
+        buffer.insert(packet).unwrap();
+        assert!(buffer.contains_key(&DataVersion { timestamp: 1 }));
+
+        let version = DataVersion { timestamp: 0 };
+        let packet = Packet::<String>::new("test".to_string(), version.clone());
+        assert!(buffer.insert(packet).is_err());
+    }
+
+    fn test_buffer_get_returns_expected_data<T: FixedSizeBuffer<Data = String>>(mut buffer: T) {
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
-            buffer.insert(version, packet.to_untyped()).unwrap();
-            let untyped_data = buffer.get(&DataVersion { timestamp: i }).unwrap();
-            let data = untyped_data.deref::<String>().unwrap();
+            buffer.insert(packet).unwrap();
+            let data = buffer.get(&DataVersion { timestamp: i }).unwrap();
             assert_eq!(*data.data, format!("test {}", i).to_string());
         }
     }
 
-    fn test_buffer_insert_returns_errr_if_full_and_block<T: FixedSizeBuffer>() {
-        let mut buffer = T::new(2, true);
+    fn test_buffer_insert_returns_errr_if_full_and_block<T: FixedSizeBuffer<Data = String>>(
+        mut buffer: T,
+    ) {
         for i in 0..3 {
             let version = DataVersion { timestamp: i };
             let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
             if i == 2 {
-                assert_eq!(
-                    buffer.insert(version, packet.to_untyped()).unwrap_err(),
-                    BufferError::BufferFull
-                );
+                assert_eq!(buffer.insert(packet).unwrap_err(), BufferError::BufferFull);
             } else {
-                buffer.insert(version, packet.to_untyped()).unwrap();
+                buffer.insert(packet).unwrap();
             }
         }
     }

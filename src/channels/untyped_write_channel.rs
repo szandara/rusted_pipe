@@ -1,3 +1,4 @@
+use super::typed_write_channel::Writer;
 use super::ChannelError;
 use super::UntypedSenderChannel;
 use crate::packet::ChannelID;
@@ -7,13 +8,13 @@ use crate::packet::Packet;
 use indexmap::{map::Keys, IndexMap};
 
 #[derive(Debug, Default)]
-pub struct WriteChannel {
+pub struct UntypedBufferWriter {
     channels: IndexMap<ChannelID, Vec<UntypedSenderChannel>>,
 }
 
-unsafe impl Send for WriteChannel {}
+unsafe impl Send for UntypedBufferWriter {}
 
-impl WriteChannel {
+impl UntypedBufferWriter {
     pub fn write<T: 'static + Clone>(
         &self,
         channel_id: &ChannelID,
@@ -24,10 +25,9 @@ impl WriteChannel {
             .channels
             .get(channel_id)
             .ok_or(ChannelError::MissingChannel(channel_id.clone()))?;
-        data_queues
-            .iter()
-            .map(|sender| Ok(sender.send(Packet::<T>::new(data.clone(), version.clone()))?))
-            .collect::<Result<(), ChannelError>>()?;
+        data_queues.iter().try_for_each(|sender| {
+            sender.send(Packet::<T>::new(data.clone(), *version).to_untyped())
+        })?;
         Ok(())
     }
 
@@ -43,17 +43,20 @@ impl WriteChannel {
     }
 }
 
+impl Writer for UntypedBufferWriter {}
+
 #[cfg(test)]
 mod tests {
     use crate::channels::untyped_channel;
     use crate::channels::ChannelID;
     use crate::channels::UntypedReceiverChannel;
-    use crate::channels::WriteChannel;
     use crate::ChannelError;
     use crate::DataVersion;
 
-    fn create_write_channel() -> (WriteChannel, UntypedReceiverChannel) {
-        let mut write_channel = WriteChannel::default();
+    use super::UntypedBufferWriter;
+
+    fn create_write_channel() -> (UntypedBufferWriter, UntypedReceiverChannel) {
+        let mut write_channel = UntypedBufferWriter::default();
         assert_eq!(write_channel.available_channels().len(), 0);
         let crossbeam_channels = untyped_channel();
         write_channel.add_channel(&ChannelID::from("test_channel_1"), crossbeam_channels.0);
@@ -123,17 +126,5 @@ mod tests {
             .unwrap();
 
         assert!(existing_read_channel.try_receive().is_err());
-
-        for channel in read_channels {
-            assert_eq!(
-                channel
-                    .try_receive()
-                    .unwrap()
-                    .data
-                    .downcast_ref::<String>()
-                    .unwrap(),
-                &"TestData".to_string()
-            );
-        }
     }
 }

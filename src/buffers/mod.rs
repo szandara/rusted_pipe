@@ -1,8 +1,7 @@
-pub mod channel_buffers;
 pub mod single_buffers;
 pub mod synchronizers;
 
-
+use crate::channels::Packet;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::UntypedPacket;
@@ -10,6 +9,7 @@ use thiserror::Error;
 
 pub type PacketBufferAddress = (ChannelID, DataVersion);
 pub type PacketWithAddress = (PacketBufferAddress, UntypedPacket);
+pub type TypedPacketWithAddress<T> = (PacketBufferAddress, Packet<T>);
 
 #[derive(Debug, Error, PartialEq, Clone)]
 pub enum BufferError {
@@ -21,33 +21,9 @@ pub enum BufferError {
     InternalError(String),
     #[error("Buffer is full")]
     BufferFull,
+    #[error(
+        "Trying to insert data returned out of order. Min version {0:?}, trying to insert {1:?}"
+    )]
+    OutOfOrder(u128, u128),
 }
-
-pub trait DataBuffer {
-    fn insert(
-        &mut self,
-        channel: &ChannelID,
-        packet: UntypedPacket,
-    ) -> Result<PacketBufferAddress, BufferError>;
-
-    fn get(&mut self, version: &PacketBufferAddress)
-        -> Result<Option<&UntypedPacket>, BufferError>;
-
-    fn available_channels(&self) -> Vec<ChannelID>;
-
-    fn create_channel(&mut self, channel: &ChannelID) -> Result<ChannelID, BufferError>;
-}
-
-pub type BufferIterator<'a> = dyn Iterator<Item = &'a UntypedPacket> + 'a;
-
-pub trait OrderedBuffer: DataBuffer {
-    fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
-
-    fn peek(&self, channel: &ChannelID) -> Option<&DataVersion>;
-
-    fn pop(&mut self, channel: &ChannelID) -> Result<Option<UntypedPacket>, BufferError>;
-
-    fn iterator<'a>(&'a self, channel: &ChannelID) -> Option<Box<BufferIterator>>;
-
-    fn are_buffers_empty(&self) -> bool;
-}
+pub type BufferIterator<'a> = dyn Iterator<Item = &'a DataVersion> + 'a;
