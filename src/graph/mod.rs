@@ -121,7 +121,8 @@ mod tests {
         }
     }
 
-    impl TerminalProcessor<ReadChannel2<String, String>> for TestNodeConsumer {
+    impl TerminalProcessor for TestNodeConsumer {
+        type INPUT = ReadChannel2<String, String>;
         fn handle(
             &mut self,
             input: ReadChannel2PacketSet<String, String>,

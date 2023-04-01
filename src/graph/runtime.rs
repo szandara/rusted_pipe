@@ -38,7 +38,7 @@ pub(super) fn read_channel_data<T: InputGenerator + ChannelBuffer + Send>(
 
 pub(super) type Wait = Arc<(Mutex<WorkerStatus>, Condvar)>;
 
-pub(super) fn consume<INPUT: InputGenerator + ChannelBuffer + Send + 'static, OUTPUT>(
+pub(super) fn consume<INPUT, OUTPUT>(
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     _free: Wait,
@@ -46,6 +46,7 @@ pub(super) fn consume<INPUT: InputGenerator + ChannelBuffer + Send + 'static, OU
     done_notification: Sender<String>,
     thread_pool: futures::executor::ThreadPool,
 ) where
+    INPUT: InputGenerator + ChannelBuffer + Send + 'static,
     OUTPUT: Writer + 'static + Send,
 {
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
