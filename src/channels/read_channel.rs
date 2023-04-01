@@ -68,14 +68,14 @@ pub trait ReadChannelTrait {
     type Data;
     fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool;
 
-    fn start(&mut self, work_queue: Arc<WorkQueue<Self::Data>>);
+    fn start(&mut self, work_queue: WorkQueue<Self::Data>);
 
     fn stop(&mut self);
 }
 
 pub struct ReadChannel<T: InputGenerator + ChannelBuffer + Send> {
     pub synch_strategy: Box<dyn PacketSynchronizer>,
-    pub work_queue: Option<Arc<WorkQueue<T::INPUT>>>,
+    pub work_queue: Option<WorkQueue<T::INPUT>>,
     pub channels: Arc<Mutex<T>>,
 }
 
@@ -84,6 +84,7 @@ unsafe impl<T: InputGenerator + ChannelBuffer + Send> Send for ReadChannel<T> {}
 
 impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for ReadChannel<T> {
     type Data = T::INPUT;
+
     fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool {
         let data = self
             .channels
@@ -118,7 +119,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
         true
     }
 
-    fn start(&mut self, work_queue: Arc<WorkQueue<Self::Data>>) {
+    fn start(&mut self, work_queue: WorkQueue<Self::Data>) {
         self.work_queue = Some(work_queue);
     }
 
@@ -128,7 +129,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
 impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
     pub fn new(
         synch_strategy: Box<dyn PacketSynchronizer>,
-        work_queue: Option<Arc<WorkQueue<T::INPUT>>>,
+        work_queue: Option<WorkQueue<T::INPUT>>,
         channels: T,
     ) -> Self {
         ReadChannel {
@@ -183,8 +184,6 @@ pub fn get_data<T>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::buffers::single_buffers::RtRingBuffer;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
 
@@ -214,11 +213,8 @@ mod tests {
             RtRingBuffer::<String>::new(2, true),
             RtRingBuffer::<String>::new(2, true),
         );
-        let read_channel = ReadChannel::new(
-            synch_strategy,
-            Some(Arc::new(WorkQueue::default())),
-            read_channel2,
-        );
+        let read_channel =
+            ReadChannel::new(synch_strategy, Some(WorkQueue::default()), read_channel2);
 
         let (channel_sender, channel_receiver) = typed_channel::<String>();
         read_channel
@@ -245,11 +241,8 @@ mod tests {
     ) -> (ReadChannel<UntypedReadChannel>, SenderChannel<Box<Untyped>>) {
         let synch_strategy = Box::new(TimestampSynchronizer::default());
         let read_channel2 = UntypedReadChannel::default();
-        let read_channel = ReadChannel::new(
-            synch_strategy,
-            Some(Arc::new(WorkQueue::default())),
-            read_channel2,
-        );
+        let read_channel =
+            ReadChannel::new(synch_strategy, Some(WorkQueue::default()), read_channel2);
 
         let (channel_sender, channel_receiver) = untyped_channel();
         read_channel
@@ -271,7 +264,7 @@ mod tests {
                 DataVersion { timestamp: 1 },
             ))
             .unwrap();
-        read_channel.start(Arc::new(WorkQueue::default()));
+        read_channel.start(WorkQueue::default());
         assert_eq!(
             read_channel
                 .channels
@@ -291,7 +284,7 @@ mod tests {
         crossbeam_channels
             .send(Packet::new("my_data".to_string(), DataVersion { timestamp: 1 }).to_untyped())
             .unwrap();
-        read_channel.start(Arc::new(WorkQueue::default()));
+        read_channel.start(WorkQueue::default());
         assert_eq!(
             read_channel
                 .channels
@@ -342,9 +335,7 @@ mod tests {
         );
         let mut read_channel = ReadChannel::new(
             synch_strategy,
-            Some(Arc::new(
-                WorkQueue::<ReadChannel2PacketSet<String, String>>::default(),
-            )),
+            Some(WorkQueue::<ReadChannel2PacketSet<String, String>>::default()),
             read_channel2,
         );
 
@@ -366,7 +357,7 @@ mod tests {
 
         let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp: 1 });
 
-        read_channel.start(Arc::new(WorkQueue::default()));
+        read_channel.start(WorkQueue::default());
         s1.send(packet.clone()).unwrap();
 
         packet.version.timestamp = 2;

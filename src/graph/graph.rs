@@ -76,7 +76,6 @@ impl Graph {
                     node.handler,
                     node.write_channel,
                 );
-                let work_queue = Arc::new(work_queue);
                 read_channel.start(work_queue.clone());
                 let done_channel = self.reader_empty.0.clone();
                 let id_clone = id.clone();
@@ -116,7 +115,6 @@ impl Graph {
             Nodes::TerminalHandler(node) => {
                 let (id, work_queue, mut read_channel, handler) =
                     (node.id, node.work_queue, node.read_channel, node.handler);
-                let work_queue = Arc::new(work_queue);
                 read_channel.start(work_queue.clone());
                 let done_channel = self.reader_empty.0.clone();
                 let id_clone = id.clone();
@@ -233,7 +231,7 @@ pub(super) struct ProcessorWorker<
     INPUT: InputGenerator + ChannelBuffer,
     OUTPUT: Writer + Send + 'static,
 > {
-    pub work_queue: Option<Arc<WorkQueue<INPUT::INPUT>>>,
+    pub work_queue: Option<WorkQueue<INPUT::INPUT>>,
     pub processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
     pub write_channel: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
     pub status: Arc<Atomic<WorkerStatus>>,

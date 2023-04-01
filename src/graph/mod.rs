@@ -175,9 +175,7 @@ mod tests {
         );
         let read_channel = ReadChannel::new(
             synch_strategy,
-            Some(Arc::new(
-                WorkQueue::<ReadChannel2PacketSet<String, String>>::default(),
-            )),
+            Some(WorkQueue::<ReadChannel2PacketSet<String, String>>::default()),
             read_channel2,
         );
 

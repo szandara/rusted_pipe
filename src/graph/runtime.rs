@@ -54,13 +54,15 @@ pub(super) fn consume<INPUT: InputGenerator + ChannelBuffer + Send + 'static, OU
 
             let mut packet = None;
             if let Some(work_queue) = worker.work_queue.as_ref() {
-                let task = work_queue.get(Some(Duration::from_millis(5)));
+                let task = work_queue.get(Some(Duration::from_millis(100)));
                 if let Ok(read_event) = task {
                     packet = Some(read_event.packet_data);
                 } else {
                     if running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
+                        println!("Sending done {id}");
                         done_notification.send(id.clone()).unwrap();
                     }
+
                     continue;
                 }
             }

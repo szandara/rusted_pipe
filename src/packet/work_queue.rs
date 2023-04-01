@@ -14,6 +14,16 @@ pub struct WorkQueue<T> {
     max_in_queue: usize,
 }
 
+impl<T> Clone for WorkQueue<T> {
+    fn clone(&self) -> Self {
+        Self {
+            notifier: self.notifier.clone(),
+            queue: self.queue.clone(),
+            max_in_queue: self.max_in_queue.clone(),
+        }
+    }
+}
+
 impl<T> WorkQueue<T> {
     pub fn default() -> Self {
         let (notifier, queue) = unbounded::<ReadEvent<T>>();

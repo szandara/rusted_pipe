@@ -1,4 +1,5 @@
 use super::read_channel::get_data;
+use super::read_channel::ReadChannel;
 use super::ChannelError;
 
 use super::read_channel::BufferReceiver;
@@ -6,8 +7,10 @@ use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
+use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::BufferIterator;
 use crate::packet::work_queue::ReadEvent;
+use crate::packet::work_queue::WorkQueue;
 use crate::DataVersion;
 
 use crossbeam::channel::select;
@@ -82,7 +85,30 @@ macro_rules! read_channels {
         }
 
         #[allow(non_camel_case_types, dead_code)]
-        impl<$($T: Clone),+> $struct_name<$($T),+> {
+        impl<$($T: Clone + Send + 'static),+> $struct_name<$($T),+> {
+            item! {
+                pub fn setup_read_channel(
+                    buffer_size: usize,
+                    block_on_full: bool,
+                    synchronizer: impl PacketSynchronizer + 'static
+                ) -> ReadChannel<$struct_name<$($T),+>> {
+                    let synch_strategy = Box::new(synchronizer);
+                    let channel = $struct_name::create(
+                        $(RtRingBuffer::<$T>::new(buffer_size, block_on_full)),+
+                    );
+                    ReadChannel::new(
+                        synch_strategy,
+                        Some(
+                            WorkQueue::<[<$struct_name PacketSet>]<$($T),+>>::default(),
+                        ),
+                        channel,
+                    )
+                }
+            }
+        }
+
+        #[allow(non_camel_case_types, dead_code)]
+        impl<$($T: Clone + Send),+> $struct_name<$($T),+> {
             pub fn create($($T: RtRingBuffer<$T>),+) -> Self {
                 Self {
                     $(
@@ -96,8 +122,6 @@ macro_rules! read_channels {
                     &mut self.$T
                 }
             )+
-
-
         }
 
         item! {

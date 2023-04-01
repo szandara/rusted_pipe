@@ -3,7 +3,7 @@ use std::{fmt, sync::MutexGuard};
 use crate::{
     channels::{
         read_channel::ReadChannel,
-        read_channel::{ChannelBuffer, InputGenerator},
+        read_channel::{self, ChannelBuffer, InputGenerator},
         typed_write_channel::{TypedWriteChannel, Writer},
     },
     RustedPipeError,
@@ -32,10 +32,50 @@ pub struct Node<INPUT: InputGenerator + ChannelBuffer + Send, OUTPUT: Writer + '
     pub write_channel: TypedWriteChannel<OUTPUT>,
 }
 
+impl<INPUT: InputGenerator + ChannelBuffer + Send, OUTPUT: Writer + 'static> Node<INPUT, OUTPUT> {
+    pub fn create(
+        id: String,
+        processor: Box<dyn Processor<INPUT, WRITE = OUTPUT>>,
+        read_channel: ReadChannel<INPUT>,
+        writer_channel: OUTPUT,
+    ) -> Node<INPUT, OUTPUT> {
+        let id = id.clone();
+        let write_channel = TypedWriteChannel {
+            writer: Box::new(writer_channel),
+        };
+        let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
+        Node {
+            handler: processor,
+            read_channel,
+            write_channel,
+            work_queue,
+            id,
+        }
+    }
+}
+
 pub struct SourceNode<WRITE: Writer + 'static> {
     pub id: String,
     pub write_channel: TypedWriteChannel<WRITE>,
     pub handler: Box<dyn SourceProcessor<WRITE = WRITE>>,
+}
+
+impl<WRITE: Writer + 'static> SourceNode<WRITE> {
+    pub fn create(
+        id: String,
+        processor: Box<dyn SourceProcessor<WRITE = WRITE>>,
+        writer_channel: WRITE,
+    ) -> SourceNode<WRITE> {
+        let write_channel = TypedWriteChannel {
+            writer: Box::new(writer_channel),
+        };
+        let id = id.clone();
+        SourceNode {
+            handler: processor,
+            write_channel,
+            id,
+        }
+    }
 }
 
 pub struct TerminalNode<INPUT: InputGenerator + ChannelBuffer + Send> {
@@ -43,6 +83,23 @@ pub struct TerminalNode<INPUT: InputGenerator + ChannelBuffer + Send> {
     pub read_channel: ReadChannel<INPUT>,
     pub handler: Box<dyn TerminalProcessor<INPUT>>,
     pub work_queue: WorkQueue<INPUT::INPUT>,
+}
+
+impl<INPUT: InputGenerator + ChannelBuffer + Send> TerminalNode<INPUT> {
+    pub fn create(
+        id: String,
+        processor: Box<dyn TerminalProcessor<INPUT>>,
+        read_channel: ReadChannel<INPUT>,
+    ) -> TerminalNode<INPUT> {
+        let id = id.clone();
+        let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
+        TerminalNode {
+            handler: processor,
+            read_channel,
+            work_queue,
+            id,
+        }
+    }
 }
 
 impl<INPUT: InputGenerator + ChannelBuffer + Send, OUTPUT: Writer> fmt::Debug
