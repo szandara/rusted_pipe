@@ -5,7 +5,10 @@ use std::{
     time::Duration,
 };
 
-use crate::channels::read_channel::ReadChannelTrait;
+use crate::channels::{
+    read_channel::ReadChannelTrait, typed_read_channel::NoBuffer,
+    typed_write_channel::WriteChannel1,
+};
 use crate::{
     buffers::single_buffers::FixedSizeBuffer,
     channels::{
@@ -22,7 +25,10 @@ use crate::{
 use atomic::{Atomic, Ordering};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 
-use super::{processor::Nodes, runtime::Wait};
+use super::{
+    processor::{Node, Nodes, SourceNode, TerminalNode},
+    runtime::Wait,
+};
 use crate::packet::work_queue::WorkQueue;
 
 pub struct Graph {
@@ -140,7 +146,28 @@ impl Graph {
         }
     }
 
+    pub fn start_source_node<OUTPUT: Writer + Send + 'static>(&mut self, node: SourceNode<OUTPUT>) {
+        self._start_node::<NoBuffer, OUTPUT>(Nodes::SourceHandler(Box::new(node)));
+    }
+
     pub fn start_node<
+        INPUT: Send + InputGenerator + ChannelBuffer + 'static,
+        OUTPUT: Writer + Send + 'static,
+    >(
+        &mut self,
+        node: Node<INPUT, OUTPUT>,
+    ) {
+        self._start_node::<INPUT, OUTPUT>(Nodes::NodeHandler(Box::new(node)));
+    }
+
+    pub fn start_terminal_node<INPUT: Send + InputGenerator + ChannelBuffer + 'static>(
+        &mut self,
+        node: TerminalNode<INPUT>,
+    ) {
+        self._start_node::<INPUT, WriteChannel1<String>>(Nodes::TerminalHandler(Box::new(node)));
+    }
+
+    fn _start_node<
         INPUT: Send + InputGenerator + ChannelBuffer + 'static,
         OUTPUT: Writer + Send + 'static,
     >(

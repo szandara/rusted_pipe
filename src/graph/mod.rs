@@ -215,11 +215,10 @@ mod tests {
         .expect("Cannot link channels");
 
         let mut graph = setup_test();
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node0)));
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node1)));
-        graph.start_node::<ReadChannel2<String, String>, WriteChannel1<String>>(
-            Nodes::TerminalHandler(Box::new(process_terminal)),
-        );
+        graph.start_source_node(node0);
+        graph.start_source_node(node1);
+        graph.start_terminal_node(process_terminal);
+
         (graph, output_check)
     }
 
@@ -423,11 +422,9 @@ mod tests {
         )
         .expect("Cannot link channels");
 
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node0)));
-        graph.start_node::<NoBuffer, WriteChannel1<String>>(Nodes::SourceHandler(Box::new(node1)));
-        graph.start_node::<ReadChannel2<String, String>, WriteChannel1<String>>(
-            Nodes::TerminalHandler(Box::new(process_terminal)),
-        );
+        graph.start_source_node(node0);
+        graph.start_source_node(node1);
+        graph.start_terminal_node(process_terminal);
 
         assert_eq!(
             output_check.recv_deadline(deadline).err().unwrap(),
