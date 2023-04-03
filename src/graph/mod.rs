@@ -301,6 +301,34 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn test_graph_starting_same_node_id_panics() {
+        let max_packets = 100;
+        let mock_processing_time_ms = 2;
+
+        let node0 = TestNodeProducer::new(
+            "producer1".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+        let node1 = TestNodeProducer::new(
+            "producer2".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+
+        let node0_clone = TestNodeProducer::new(
+            "producer1".to_string(),
+            mock_processing_time_ms,
+            max_packets,
+        );
+
+        let (mut graph, _) = setup_default_test(node0, node1, 10, WorkQueue::default());
+        let node0_clone = create_source_node(node0_clone);
+        graph.start_source_node(node0_clone);
+    }
+
+    #[test]
     fn test_linked_nodes_can_send_and_receive_at_different_produce_speed() {
         let max_packets = 10;
         let mock_processing_time_ms = 3;

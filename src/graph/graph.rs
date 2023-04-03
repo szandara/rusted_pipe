@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
@@ -23,6 +23,7 @@ use crate::{
 };
 use atomic::{Atomic, Ordering};
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use itertools::Itertools;
 
 use super::{
     processor::{Node, Nodes, SourceNode, TerminalNode},
@@ -34,8 +35,8 @@ pub struct Graph {
     running: Arc<Atomic<GraphStatus>>,
     thread_control: Vec<Wait>,
     pool: futures::executor::ThreadPool,
-    node_threads: Vec<(String, JoinHandle<()>)>,
-    read_threads: Vec<(String, JoinHandle<()>)>,
+    node_threads: HashMap<String, JoinHandle<()>>,
+    read_threads: HashMap<String, JoinHandle<()>>,
     worker_done: (Sender<String>, Receiver<String>),
     reader_empty: (Sender<String>, Receiver<String>),
 }
@@ -57,10 +58,16 @@ impl Graph {
             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
             thread_control: vec![],
             pool: futures::executor::ThreadPool::new().expect("Failed to build pool"),
-            node_threads: Vec::<(String, JoinHandle<()>)>::default(),
-            read_threads: Vec::<(String, JoinHandle<()>)>::default(),
+            node_threads: Default::default(),
+            read_threads: Default::default(),
             worker_done: unbounded::<String>(),
             reader_empty: unbounded::<String>(),
+        }
+    }
+
+    fn track_node_thread(&mut self, id: String, handle: JoinHandle<()>) {
+        if self.read_threads.insert(id.clone(), handle).is_some() {
+            panic!("Node {id} already exists");
         }
     }
 
@@ -85,7 +92,7 @@ impl Graph {
                 let done_channel = self.reader_empty.0.clone();
                 let id_clone = id.clone();
 
-                self.read_threads.push((
+                self.track_node_thread(
                     id.clone(),
                     thread::spawn(move || {
                         read_channel_data(
@@ -95,7 +102,7 @@ impl Graph {
                             done_channel,
                         )
                     }),
-                ));
+                );
 
                 let work_queue_processor = work_queue;
                 (
@@ -124,12 +131,12 @@ impl Graph {
                 let done_channel = self.reader_empty.0.clone();
                 let id_clone = id.clone();
 
-                self.read_threads.push((
+                self.track_node_thread(
                     id.clone(),
                     thread::spawn(move || {
                         read_channel_data(id, reading_running_thread, read_channel, done_channel)
                     }),
-                ));
+                );
 
                 let work_queue_processor = work_queue;
                 (
@@ -188,19 +195,26 @@ impl Graph {
         let wait_clone = wait.clone();
         let thread_clone = self.pool.clone();
         let id_move = node_id.clone();
-        self.node_threads.push((
-            node_id.clone(),
-            thread::spawn(move || {
-                consume(
-                    id_move,
-                    consume_running_thread,
-                    wait_clone,
-                    worker,
-                    done_channel,
-                    thread_clone,
-                )
-            }),
-        ));
+        if self
+            .node_threads
+            .insert(
+                node_id.clone(),
+                thread::spawn(move || {
+                    consume(
+                        id_move,
+                        consume_running_thread,
+                        wait_clone,
+                        worker,
+                        done_channel,
+                        thread_clone,
+                    )
+                }),
+            )
+            .is_some()
+        {
+            panic!("Node {node_id} already started!");
+        }
+
         self.thread_control.push(wait.clone());
         println!("Done Starting Node {node_id}");
     }
@@ -214,7 +228,11 @@ impl Graph {
             self.running
                 .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
 
-            while !self.node_threads.iter().all(|n| empty_set.contains(&n.0)) {
+            while !self
+                .node_threads
+                .iter()
+                .all(|n| empty_set.contains(n.0.as_str()))
+            {
                 println!(
                     "Waiting node threads received done from {} out of {}",
                     empty_set.len(),
@@ -228,7 +246,11 @@ impl Graph {
                     empty_set.insert(done);
                 }
             }
-            while !self.read_threads.iter().all(|n| empty_set.contains(&n.0)) {
+            while !self
+                .read_threads
+                .iter()
+                .all(|n| empty_set.contains(n.0.as_str()))
+            {
                 println!(
                     "Waiting reader threads received done from {} out of {}",
                     empty_receiver_set.len(),
@@ -246,12 +268,14 @@ impl Graph {
         self.running
             .swap(GraphStatus::Terminating, Ordering::Relaxed);
 
-        while self.node_threads.len() > 0 {
-            self.node_threads.pop().unwrap().1.join().unwrap();
+        let keys = self.node_threads.keys().cloned().collect_vec();
+        for id in keys {
+            self.node_threads.remove(&id).unwrap().join().unwrap();
         }
 
-        while self.read_threads.len() > 0 {
-            self.read_threads.pop().unwrap().1.join().unwrap();
+        let keys = self.read_threads.keys().cloned().collect_vec();
+        for id in keys {
+            self.read_threads.remove(&id).unwrap().join().unwrap();
         }
     }
 }
