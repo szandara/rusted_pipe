@@ -33,6 +33,9 @@ pub struct BufferReceiver<T: FixedSizeBuffer + ?Sized> {
 
 impl<T: FixedSizeBuffer + ?Sized> BufferReceiver<T> {
     pub fn link(&mut self, receiver: ReceiverChannel<T::Data>) {
+        if self.channel.is_some() {
+            panic!("Channel is already linked!");
+        }
         self.channel = Some(receiver);
     }
 
@@ -404,5 +407,18 @@ mod tests {
             .c1()
             .try_read()
             .is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_read_channel_panics_if_already_linked() {
+        let (_, channel_receiver) = typed_channel::<String>();
+        let (read_channel, _) = create_typed_read_channel();
+        read_channel
+            .channels
+            .lock()
+            .unwrap()
+            .c1()
+            .link(channel_receiver);
     }
 }
