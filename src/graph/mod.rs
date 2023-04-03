@@ -6,13 +6,11 @@ pub mod runtime;
 mod tests {
     use super::graph::link;
     use super::graph::Graph;
-    use super::processor::Nodes;
     use super::processor::SourceNode;
     use super::processor::SourceProcessor;
     use super::processor::TerminalNode;
     use super::processor::TerminalProcessor;
-
-    use std::sync::Arc;
+    use crate::channels::WriteChannelTrait;
 
     use std::thread;
 
@@ -28,7 +26,6 @@ mod tests {
 
     use crate::buffers::single_buffers::RtRingBuffer;
     use crate::buffers::synchronizers::timestamp::TimestampSynchronizer;
-    use crate::channels::typed_read_channel::NoBuffer;
     use crate::channels::typed_read_channel::ReadChannel2;
     use crate::channels::typed_write_channel::WriteChannel1;
 
@@ -60,10 +57,10 @@ mod tests {
     }
 
     impl SourceProcessor for TestNodeProducer {
-        type WRITE = WriteChannel1<String>;
+        type OUTPUT = WriteChannel1<String>;
         fn handle(
             &mut self,
-            mut output_channel: MutexGuard<TypedWriteChannel<Self::WRITE>>,
+            mut output_channel: MutexGuard<TypedWriteChannel<Self::OUTPUT>>,
         ) -> Result<(), RustedPipeError> {
             thread::sleep(Duration::from_millis(self.produce_time_ms));
             if self.counter == self.max_packets {
@@ -204,14 +201,14 @@ mod tests {
             create_consumer_node(process_terminal, consumer_queue_strategy, 2000, false);
 
         link(
-            process_terminal.read_channel.channels.lock().unwrap().c1(),
             node0.write_channel.writer.c1(),
+            process_terminal.read_channel.channels.lock().unwrap().c1(),
         )
         .expect("Cannot link channels");
 
         link(
-            process_terminal.read_channel.channels.lock().unwrap().c2(),
             node1.write_channel.writer.c1(),
+            process_terminal.read_channel.channels.lock().unwrap().c2(),
         )
         .expect("Cannot link channels");
 
@@ -412,14 +409,14 @@ mod tests {
         let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
 
         link(
-            process_terminal.read_channel.channels.lock().unwrap().c1(),
             node0.write_channel.writer.c1(),
+            process_terminal.read_channel.channels.lock().unwrap().c1(),
         )
         .expect("Cannot link channels");
 
         link(
-            process_terminal.read_channel.channels.lock().unwrap().c2(),
             node1.write_channel.writer.c1(),
+            process_terminal.read_channel.channels.lock().unwrap().c2(),
         )
         .expect("Cannot link channels");
 

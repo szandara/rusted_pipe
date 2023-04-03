@@ -169,6 +169,10 @@ impl InputGenerator for UntypedReadChannel {
         }
         Some(UntypedPacketSet::new(packet_set))
     }
+
+    fn create_channels(_buffer_size: usize, _block_on_full: bool) -> Self {
+        Self::default()
+    }
 }
 
 #[cfg(test)]

@@ -9,7 +9,10 @@ use crossbeam::channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sende
 pub use crate::packet::{
     ChannelID, DataVersion, Packet, PacketError, UntypedPacket, UntypedPacketCast,
 };
-use crate::{buffers::BufferError, packet::Untyped};
+use crate::{
+    buffers::BufferError,
+    packet::{work_queue::WorkQueue, Untyped},
+};
 
 use thiserror::Error;
 
@@ -96,4 +99,18 @@ impl<T> SenderChannel<T> {
             )),
         }
     }
+}
+
+pub trait WriteChannelTrait {
+    fn create() -> Self;
+}
+
+pub trait ReadChannelTrait {
+    type Data;
+
+    fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool;
+
+    fn start(&mut self, work_queue: WorkQueue<Self::Data>);
+
+    fn stop(&mut self);
 }

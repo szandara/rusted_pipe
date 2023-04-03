@@ -1,12 +1,10 @@
+use super::{ChannelError, Packet, SenderChannel};
+use crate::channels::WriteChannelTrait;
 use crate::DataVersion;
 
-use super::{ChannelError, Packet, SenderChannel};
-
-pub struct TypedWriteChannel<WRITE: Writer + ?Sized> {
-    pub writer: Box<WRITE>,
+pub struct TypedWriteChannel<OUTPUT: WriteChannelTrait + ?Sized> {
+    pub writer: Box<OUTPUT>,
 }
-
-pub trait Writer {}
 
 pub struct BufferWriter<U> {
     pub channels: Vec<SenderChannel<U>>,
@@ -37,17 +35,18 @@ macro_rules! write_channels {
         }
 
         #[allow(non_camel_case_types)]
-        impl<$($T: Clone),+> Writer for $struct_name<$($T),+> {}
-
-        #[allow(non_camel_case_types, dead_code)]
-        impl<$($T: Clone),+> $struct_name<$($T),+> {
-            pub fn create() -> Self {
+        impl<$($T: Clone),+> WriteChannelTrait for $struct_name<$($T),+> {
+            fn create() -> Self {
                 Self {
                     $(
                         $T: BufferWriter::<$T>::default(),
                     )+
                 }
             }
+        }
+
+        #[allow(non_camel_case_types, dead_code)]
+        impl<$($T: Clone),+> $struct_name<$($T),+> {
 
             $(
 
@@ -71,6 +70,7 @@ write_channels!(WriteChannel8, c1, c2, c3, c4, c5, c6, c7, c8);
 #[cfg(test)]
 mod tests {
     use crate::channels::typed_channel;
+    use crate::channels::WriteChannelTrait;
 
     use crate::channels::ReceiverChannel;
 

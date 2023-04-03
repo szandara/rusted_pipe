@@ -6,7 +6,13 @@ use std::{
 use crossbeam::channel::Sender;
 
 use crate::{
-    buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
+    buffers::{
+        single_buffers::RtRingBuffer,
+        synchronizers::{
+            real_time::RealTimeSynchronizer, timestamp::TimestampSynchronizer, PacketSynchronizer,
+            SynchronizerTypes,
+        },
+    },
     packet::work_queue::WorkQueue,
 };
 
@@ -18,7 +24,7 @@ use crate::{
     DataVersion,
 };
 
-use super::{ChannelError, Packet, ReceiverChannel};
+use super::{ChannelError, Packet, ReadChannelTrait, ReceiverChannel};
 
 pub struct BufferReceiver<T: FixedSizeBuffer + ?Sized> {
     pub buffer: Box<T>,
@@ -62,15 +68,8 @@ pub trait InputGenerator {
         data_versions: &HashMap<String, Option<DataVersion>>,
         exact_match: bool,
     ) -> Option<Self::INPUT>;
-}
 
-pub trait ReadChannelTrait {
-    type Data;
-    fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool;
-
-    fn start(&mut self, work_queue: WorkQueue<Self::Data>);
-
-    fn stop(&mut self);
+    fn create_channels(buffer_size: usize, block_on_full: bool) -> Self;
 }
 
 pub struct ReadChannel<T: InputGenerator + ChannelBuffer + Send> {
@@ -135,6 +134,24 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         ReadChannel {
             synch_strategy,
             work_queue,
+            channels: Arc::new(Mutex::new(channels)),
+        }
+    }
+
+    pub fn create(
+        block_channel_full: bool,
+        channel_buffer_size: usize,
+        process_buffer_size: usize,
+        synchronizer_type: SynchronizerTypes,
+    ) -> Self {
+        let channels = T::create_channels(channel_buffer_size, block_channel_full);
+        let synch_strategy: Box<dyn PacketSynchronizer> = match synchronizer_type {
+            SynchronizerTypes::TIMESTAMP => Box::new(TimestampSynchronizer::default()),
+            SynchronizerTypes::REALTIME => Box::new(RealTimeSynchronizer::default()),
+        };
+        Self {
+            synch_strategy,
+            work_queue: Some(WorkQueue::<T::INPUT>::new(process_buffer_size)),
             channels: Arc::new(Mutex::new(channels)),
         }
     }

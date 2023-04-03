@@ -14,8 +14,8 @@ pub trait PacketSynchronizer: Send {
     ) -> Option<HashMap<String, Option<DataVersion>>>;
 }
 
-fn synchronize(
-    ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+fn synchronize<'a>(
+    ordered_buffer: Arc<Mutex<dyn ChannelBuffer + 'a>>,
 ) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
 
@@ -26,7 +26,9 @@ fn synchronize(
     None
 }
 
-fn get_min_versions(buffer: Arc<Mutex<dyn ChannelBuffer>>) -> HashMap<String, Option<DataVersion>> {
+fn get_min_versions<'a>(
+    buffer: Arc<Mutex<dyn ChannelBuffer + 'a>>,
+) -> HashMap<String, Option<DataVersion>> {
     let buffer = buffer.lock().unwrap();
     let mut out_map = HashMap::<String, Option<DataVersion>>::default();
 
@@ -34,6 +36,11 @@ fn get_min_versions(buffer: Arc<Mutex<dyn ChannelBuffer>>) -> HashMap<String, Op
         out_map.insert(channel.to_string(), buffer.peek(channel).cloned());
     }
     out_map
+}
+
+pub enum SynchronizerTypes {
+    TIMESTAMP,
+    REALTIME,
 }
 
 #[cfg(test)]

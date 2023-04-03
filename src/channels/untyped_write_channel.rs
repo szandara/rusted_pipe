@@ -1,6 +1,6 @@
-use super::typed_write_channel::Writer;
 use super::ChannelError;
 use super::UntypedSenderChannel;
+use super::WriteChannelTrait;
 use crate::packet::ChannelID;
 use crate::packet::DataVersion;
 use crate::packet::Packet;
@@ -43,7 +43,11 @@ impl UntypedBufferWriter {
     }
 }
 
-impl Writer for UntypedBufferWriter {}
+impl WriteChannelTrait for UntypedBufferWriter {
+    fn create() -> Self {
+        Self::default()
+    }
+}
 
 #[cfg(test)]
 mod tests {

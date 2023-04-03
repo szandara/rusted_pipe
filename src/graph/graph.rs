@@ -5,16 +5,15 @@ use std::{
     time::Duration,
 };
 
-use crate::channels::{
-    read_channel::ReadChannelTrait, typed_read_channel::NoBuffer,
-    typed_write_channel::WriteChannel1,
-};
+use crate::channels::ReadChannelTrait;
+use crate::channels::WriteChannelTrait;
+use crate::channels::{typed_read_channel::NoBuffer, typed_write_channel::WriteChannel1};
 use crate::{
     buffers::single_buffers::FixedSizeBuffer,
     channels::{
         read_channel::{BufferReceiver, ChannelBuffer, InputGenerator},
         typed_channel,
-        typed_write_channel::{BufferWriter, TypedWriteChannel, Writer},
+        typed_write_channel::{BufferWriter, TypedWriteChannel},
     },
     graph::{
         processor::Processors,
@@ -42,8 +41,8 @@ pub struct Graph {
 }
 
 pub fn link<U: Clone + 'static>(
-    read: &mut BufferReceiver<impl FixedSizeBuffer<Data = U>>,
     write: &mut BufferWriter<U>,
+    read: &mut BufferReceiver<impl FixedSizeBuffer<Data = U>>,
 ) -> Result<(), RustedPipeError> {
     let (channel_sender, channel_receiver) = typed_channel::<U>();
     read.link(channel_receiver);
@@ -67,7 +66,7 @@ impl Graph {
 
     fn get_worker<
         INPUT: Send + InputGenerator + ChannelBuffer + 'static,
-        OUTPUT: Writer + Send + 'static,
+        OUTPUT: WriteChannelTrait + Send + 'static,
     >(
         &mut self,
         node: Nodes<INPUT, OUTPUT>,
@@ -146,13 +145,16 @@ impl Graph {
         }
     }
 
-    pub fn start_source_node<OUTPUT: Writer + Send + 'static>(&mut self, node: SourceNode<OUTPUT>) {
+    pub fn start_source_node<OUTPUT: WriteChannelTrait + Send + 'static>(
+        &mut self,
+        node: SourceNode<OUTPUT>,
+    ) {
         self._start_node::<NoBuffer, OUTPUT>(Nodes::SourceHandler(Box::new(node)));
     }
 
     pub fn start_node<
         INPUT: Send + InputGenerator + ChannelBuffer + 'static,
-        OUTPUT: Writer + Send + 'static,
+        OUTPUT: WriteChannelTrait + Send + 'static,
     >(
         &mut self,
         node: Node<INPUT, OUTPUT>,
@@ -169,7 +171,7 @@ impl Graph {
 
     fn _start_node<
         INPUT: Send + InputGenerator + ChannelBuffer + 'static,
-        OUTPUT: Writer + Send + 'static,
+        OUTPUT: WriteChannelTrait + Send + 'static,
     >(
         &mut self,
         processor: Nodes<INPUT, OUTPUT>,
@@ -256,7 +258,7 @@ impl Graph {
 
 pub(super) struct ProcessorWorker<
     INPUT: InputGenerator + ChannelBuffer,
-    OUTPUT: Writer + Send + 'static,
+    OUTPUT: WriteChannelTrait + Send + 'static,
 > {
     pub work_queue: Option<WorkQueue<INPUT::INPUT>>,
     pub processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,

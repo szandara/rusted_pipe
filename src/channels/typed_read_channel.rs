@@ -1,5 +1,4 @@
 use super::read_channel::get_data;
-use super::read_channel::ReadChannel;
 use super::ChannelError;
 
 use super::read_channel::BufferReceiver;
@@ -7,10 +6,8 @@ use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
-use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::buffers::BufferIterator;
 use crate::packet::work_queue::ReadEvent;
-use crate::packet::work_queue::WorkQueue;
 use crate::DataVersion;
 
 use crossbeam::channel::select;
@@ -84,28 +81,28 @@ macro_rules! read_channels {
             }
         }
 
-        #[allow(non_camel_case_types, dead_code)]
-        impl<$($T: Clone + Send + 'static),+> $struct_name<$($T),+> {
-            item! {
-                pub fn setup_read_channel(
-                    buffer_size: usize,
-                    block_on_full: bool,
-                    synchronizer: impl PacketSynchronizer + 'static
-                ) -> ReadChannel<$struct_name<$($T),+>> {
-                    let synch_strategy = Box::new(synchronizer);
-                    let channel = $struct_name::create(
-                        $(RtRingBuffer::<$T>::new(buffer_size, block_on_full)),+
-                    );
-                    ReadChannel::new(
-                        synch_strategy,
-                        Some(
-                            WorkQueue::<[<$struct_name PacketSet>]<$($T),+>>::default(),
-                        ),
-                        channel,
-                    )
-                }
-            }
-        }
+        // #[allow(non_camel_case_types, dead_code)]
+        // impl<'a, $($T: Clone + Send + 'static),+> $struct_name<$($T),+> {
+        //     item! {
+        //         pub fn setup_read_channel(
+        //             buffer_size: usize,
+        //             block_on_full: bool,
+        //             synchronizer: impl PacketSynchronizer<'a>
+        //         ) -> ReadChannel<$struct_name<$($T),+>> {
+        //             let synch_strategy = Box::new(synchronizer);
+        //             let channel = $struct_name::create(
+        //                 $(RtRingBuffer::<$T>::new(buffer_size, block_on_full)),+
+        //             );
+        //             ReadChannel::new(
+        //                 synch_strategy,
+        //                 Some(
+        //                     WorkQueue::<[<$struct_name PacketSet>]<$($T),+>>::default(),
+        //                 ),
+        //                 channel,
+        //             )
+        //         }
+        //     }
+        // }
 
         #[allow(non_camel_case_types, dead_code)]
         impl<$($T: Clone + Send),+> $struct_name<$($T),+> {
@@ -126,8 +123,17 @@ macro_rules! read_channels {
 
         item! {
             #[allow(non_camel_case_types)]
-            impl<$($T: Clone),+> InputGenerator for $struct_name<$($T),+> {
+            impl<$($T: Clone + Send),+> InputGenerator for $struct_name<$($T),+> {
                 type INPUT = [<$struct_name PacketSet>]<$($T),+>;
+
+                fn create_channels(
+                    buffer_size: usize,
+                    block_on_full: bool,
+                ) -> $struct_name<$($T),+> {
+                    $struct_name::create(
+                        $(RtRingBuffer::<$T>::new(buffer_size, block_on_full)),+
+                    )
+                }
 
                 fn get_packets_for_version(
                     &mut self,
@@ -171,6 +177,10 @@ impl InputGenerator for NoBuffer {
         _data_versions: &HashMap<String, Option<DataVersion>>,
         _exact_match: bool,
     ) -> Option<Self::INPUT> {
+        todo!()
+    }
+
+    fn create_channels(_buffer_size: usize, _block_on_full: bool) -> Self {
         todo!()
     }
 }

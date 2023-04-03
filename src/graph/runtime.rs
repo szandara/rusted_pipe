@@ -4,12 +4,11 @@ use std::{
     time::Duration,
 };
 
-use crate::channels::{read_channel::ReadChannel, read_channel::ReadChannelTrait};
+use crate::channels::read_channel::ReadChannel;
+use crate::channels::ReadChannelTrait;
+use crate::channels::WriteChannelTrait;
 use crate::{
-    channels::{
-        read_channel::{ChannelBuffer, InputGenerator},
-        typed_write_channel::Writer,
-    },
+    channels::read_channel::{ChannelBuffer, InputGenerator},
     RustedPipeError,
 };
 use atomic::{Atomic, Ordering};
@@ -47,7 +46,7 @@ pub(super) fn consume<INPUT, OUTPUT>(
     thread_pool: futures::executor::ThreadPool,
 ) where
     INPUT: InputGenerator + ChannelBuffer + Send + 'static,
-    OUTPUT: Writer + 'static + Send,
+    OUTPUT: WriteChannelTrait + 'static + Send,
 {
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
         if worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
