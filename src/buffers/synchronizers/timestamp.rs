@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TimestampSynchronizer {}
 
 impl PacketSynchronizer for TimestampSynchronizer {

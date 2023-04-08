@@ -1,14 +1,14 @@
 use super::read_channel::get_data;
-use super::ChannelError;
-
 use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
+use super::ChannelError;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
 use crate::buffers::BufferIterator;
 use crate::packet::work_queue::ReadEvent;
 use crate::DataVersion;
+use std::io::Write;
 
 use crossbeam::channel::select;
 use paste::item;
@@ -64,7 +64,7 @@ macro_rules! read_channels {
                             .as_ref()
                             .expect(&format!("Channel not connected {} {}",
                                 stringify!($struct_name), stringify!($T))).receiver) -> msg =>
-                                    {Some(self.$T.buffer.insert(msg?))},
+                                    {println!("On buffer {:?}, got data on channel {:?}", stringify!($struct_name), stringify!($T));Some(self.$T.buffer.insert(msg?))},
                     )+
                     default(timeout) => None,
                 };

@@ -6,9 +6,9 @@ use crate::DataVersion;
 
 use std::cmp::min;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
-use std::hash::Hash;
 use std::iter::Peekable;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 #[derive(Debug, Default, Clone)]
 pub struct RealTimeSynchronizer {
@@ -48,18 +48,22 @@ fn find_common_min<'a>(
         iterators.iter_mut().map(|i| i.peekable()).collect();
     let mut new_targets = BinaryHeap::default();
     let mut target_set = HashSet::new();
+    let start_duration = Instant::now();
     loop {
         let mut all_tolerance_or_finished = false;
 
+        let s_loop = Instant::now();
         while !all_tolerance_or_finished {
             let peekers_loop = peekers.iter_mut().enumerate();
             let mut done = 0;
+            println!("Peekers {:?}", Instant::now() - s_loop);
+            let f_loop = Instant::now();
             for (i, peek) in peekers_loop {
                 if let Some(peek_next) = peek.peek().cloned() {
-                    println!(
-                        "Target {:?}, tolerance {}, Next {i}: {}",
-                        target, tolerance, peek_next.timestamp
-                    );
+                    // println!(
+                    //     "Target {:?}, tolerance {}, Next {i}: {}, min_timestamp {}",
+                    //     target, tolerance, peek_next.timestamp, min_timestamp
+                    // );
                     if peek_next.timestamp <= min_timestamp {
                         peek.next();
                         continue;
@@ -67,7 +71,7 @@ fn find_common_min<'a>(
                     if target + tolerance < peek_next.timestamp {
                         // Not within tolerance, increment target.
                         if !target_set.contains(&peek_next.timestamp) {
-                            println!("New Target {i}: {}", peek_next.timestamp);
+                            //println!("New Target {i}: {}", peek_next.timestamp);
                             new_targets.push(peek_next.timestamp);
                             target_set.insert(peek_next.timestamp);
                         }
@@ -75,7 +79,7 @@ fn find_common_min<'a>(
                     } else if target - min(tolerance, target) <= peek_next.timestamp
                         && peek_next.timestamp <= target + tolerance
                     {
-                        println!("In tolerance {i}: {}", peek_next.timestamp);
+                        //println!("In tolerance {i}: {}", peek_next.timestamp);
                         buffers_tolerance[i].push_back(peek_next.timestamp);
                         peek.next();
                     } else {
@@ -89,16 +93,19 @@ fn find_common_min<'a>(
                     all_tolerance_or_finished = true;
                 }
             }
+            println!("For loop in {:?}", Instant::now() - f_loop);
         }
+        println!("While loop in {:?}", Instant::now() - s_loop);
 
         for m in 0..iterators_len {
             matches[m] = None;
         }
-        println!("Buffers");
+        //println!("Buffers");
+        let check_loop = Instant::now();
         let buffer_min = buffers_tolerance
             .iter()
             .map(|b| {
-                println!("b {:?}", b);
+                //println!("b {:?}", b);
                 if b.len() > 0 {
                     return Some(b[0]);
                 } else {
@@ -114,7 +121,7 @@ fn find_common_min<'a>(
                 }
                 let target_match = tolerance[0];
                 if target_match == min || wait_all {
-                    println!("Adding {target_match}");
+                    //println!("Adding {target_match}");
                     matches[i] = Some(DataVersion {
                         timestamp: target_match,
                     });
@@ -140,10 +147,10 @@ fn find_common_min<'a>(
                         }
                     }
                 }
-                println!("min_min {:?}", min_min);
+                //println!("min_min {:?}", min_min);
                 if let Some(u_min_min) = min_min {
                     if u_min_min > target_match - min {
-                        println!("Adding {target_match}");
+                        //println!("Adding {target_match}");
                         matches[i] = Some(DataVersion {
                             timestamp: target_match,
                         });
@@ -151,23 +158,29 @@ fn find_common_min<'a>(
                 }
             }
         }
+        println!("Check loop in {:?}", Instant::now() - check_loop);
 
         if buffer_min.is_none() || wait_all && matches.contains(&None) {
             if let Some(nt) = new_targets.pop() {
                 target = nt;
-                println!("New target {nt}");
+                //println!("New target {nt}");
                 for b in buffers_tolerance.iter_mut() {
                     while b.len() > 0 && b[0] < nt - tolerance {
                         b.pop_front();
                     }
                 }
             } else {
+                println!("Returning None in {:?}", Instant::now() - start_duration);
                 return None;
             }
             continue;
         }
 
-        println!("Returning {:?}", matches);
+        println!(
+            "Returning {:?} in {:?}",
+            matches,
+            Instant::now() - start_duration
+        );
         return Some(matches);
     }
 }
