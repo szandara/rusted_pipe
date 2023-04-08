@@ -132,6 +132,23 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
         }
         Ok(false)
     }
+
+    fn min_version(&self) -> Option<&DataVersion> {
+        let mut min = None;
+        for buffer in self.buffered_data.values() {
+            let val = buffer.buffer.peek();
+            if min.is_none() {
+                min = val;
+                continue;
+            }
+            if let Some(val) = val {
+                if val.timestamp < min.unwrap().timestamp {
+                    min = Some(val);
+                }
+            }
+        }
+        return min;
+    }
 }
 
 impl InputGenerator for UntypedReadChannel {

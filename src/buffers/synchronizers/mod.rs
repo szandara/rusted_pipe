@@ -7,6 +7,9 @@ use crate::DataVersion;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use self::real_time::RealTimeSynchronizer;
+use self::timestamp::TimestampSynchronizer;
+
 pub trait PacketSynchronizer: Send {
     fn synchronize(
         &mut self,
@@ -14,8 +17,8 @@ pub trait PacketSynchronizer: Send {
     ) -> Option<HashMap<String, Option<DataVersion>>>;
 }
 
-fn synchronize<'a>(
-    ordered_buffer: Arc<Mutex<dyn ChannelBuffer + 'a>>,
+fn synchronize(
+    ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
 ) -> Option<HashMap<String, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
 
@@ -39,8 +42,8 @@ fn get_min_versions<'a>(
 }
 
 pub enum SynchronizerTypes {
-    TIMESTAMP,
-    REALTIME,
+    TIMESTAMP(TimestampSynchronizer),
+    REALTIME(RealTimeSynchronizer),
 }
 
 #[cfg(test)]
@@ -50,33 +53,48 @@ pub mod tests {
         sync::{Arc, Mutex},
     };
 
+    use itertools::Itertools;
+
     use crate::{
         buffers::{
             single_buffers::{FixedSizeBuffer, RtRingBuffer},
             synchronizers::synchronize,
         },
-        channels::{typed_read_channel::ReadChannel2, Packet},
+        channels::{typed_read_channel::ReadChannel3, Packet},
         DataVersion,
     };
 
-    pub fn create_test_buffer() -> ReadChannel2<String, String> {
-        ReadChannel2::create(
+    pub fn create_test_buffer() -> ReadChannel3<String, String, String> {
+        ReadChannel3::create(
+            RtRingBuffer::<String>::new(100, false),
             RtRingBuffer::<String>::new(100, false),
             RtRingBuffer::<String>::new(100, false),
         )
     }
 
-    pub fn check_packet_set_contains_version(
+    pub fn check_packet_set_contains_versions(
         versions: &HashMap<String, Option<DataVersion>>,
-        version: u128,
+        expected_versions: Vec<Option<u128>>,
     ) {
-        assert!(versions
-            .values()
-            .all(|v| v.is_some() && v.unwrap().timestamp == version));
+        let keys = versions.keys().sorted();
+        let timestamps = keys
+            .map(|v| {
+                if let Some(version) = versions.get(v).unwrap() {
+                    return Some(version.timestamp);
+                }
+                None
+            })
+            .collect::<Vec<Option<u128>>>();
+        assert!(
+            timestamps == expected_versions,
+            "returned {:?}, expected {:?}",
+            timestamps,
+            expected_versions
+        );
     }
 
     pub fn add_data(
-        buffer: Arc<Mutex<ReadChannel2<String, String>>>,
+        buffer: Arc<Mutex<ReadChannel3<String, String, String>>>,
         channel_id: String,
         version_timestamp: u128,
     ) {
@@ -99,6 +117,14 @@ pub mod tests {
                 .lock()
                 .unwrap()
                 .c2()
+                .buffer
+                .insert(packet.clone())
+                .unwrap();
+        } else if channel_id == "c3" {
+            buffer
+                .lock()
+                .unwrap()
+                .c3()
                 .buffer
                 .insert(packet.clone())
                 .unwrap();

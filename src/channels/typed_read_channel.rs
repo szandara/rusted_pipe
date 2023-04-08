@@ -79,30 +79,26 @@ macro_rules! read_channels {
                 )+
                 None
             }
-        }
 
-        // #[allow(non_camel_case_types, dead_code)]
-        // impl<'a, $($T: Clone + Send + 'static),+> $struct_name<$($T),+> {
-        //     item! {
-        //         pub fn setup_read_channel(
-        //             buffer_size: usize,
-        //             block_on_full: bool,
-        //             synchronizer: impl PacketSynchronizer<'a>
-        //         ) -> ReadChannel<$struct_name<$($T),+>> {
-        //             let synch_strategy = Box::new(synchronizer);
-        //             let channel = $struct_name::create(
-        //                 $(RtRingBuffer::<$T>::new(buffer_size, block_on_full)),+
-        //             );
-        //             ReadChannel::new(
-        //                 synch_strategy,
-        //                 Some(
-        //                     WorkQueue::<[<$struct_name PacketSet>]<$($T),+>>::default(),
-        //                 ),
-        //                 channel,
-        //             )
-        //         }
-        //     }
-        // }
+            fn min_version(&self) -> Option<&DataVersion> {
+                let vals = [$(
+                    self.$T.buffer.peek(),
+                )+];
+                let mut min = None;
+                for val in vals {
+                    if min.is_none() && val.is_some() {
+                        min = val;
+                        continue;
+                    }
+                    if let Some(val) = val {
+                        if val.timestamp < min.unwrap().timestamp  {
+                            min = Some(val);
+                        }
+                    }
+                }
+                return min;
+            }
+        }
 
         #[allow(non_camel_case_types, dead_code)]
         impl<$($T: Clone + Send),+> $struct_name<$($T),+> {
@@ -188,6 +184,10 @@ impl InputGenerator for NoBuffer {
 impl ChannelBuffer for NoBuffer {
     fn available_channels(&self) -> Vec<&str> {
         todo!()
+    }
+
+    fn min_version(&self) -> Option<&DataVersion> {
+        todo!();
     }
 
     fn has_version(&self, _: &str, _: &DataVersion) -> bool {

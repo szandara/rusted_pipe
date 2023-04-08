@@ -23,7 +23,7 @@ mod tests {
     use super::*;
     use crate::{
         buffers::synchronizers::tests::{
-            add_data, check_packet_set_contains_version, create_test_buffer,
+            add_data, check_packet_set_contains_versions, create_test_buffer,
         },
         channels::read_channel::InputGenerator,
     };
@@ -36,6 +36,8 @@ mod tests {
 
         add_data(safe_buffer.clone(), "c1".to_string(), 2);
         add_data(safe_buffer.clone(), "c1".to_string(), 3);
+        add_data(safe_buffer.clone(), "c3".to_string(), 2);
+        add_data(safe_buffer.clone(), "c3".to_string(), 3);
 
         // No data because the minum versions do not match
         let synch = test_synch.synchronize(safe_buffer.clone());
@@ -44,9 +46,10 @@ mod tests {
         add_data(safe_buffer.clone(), "c2".to_string(), 2);
         add_data(safe_buffer.clone(), "c2".to_string(), 3);
         add_data(safe_buffer.clone(), "c1".to_string(), 4);
+        add_data(safe_buffer.clone(), "c3".to_string(), 4);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
-        check_packet_set_contains_version(&synch.as_ref().unwrap(), 2);
+        check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(2); 3]);
 
         safe_buffer
             .lock()
@@ -54,7 +57,7 @@ mod tests {
             .get_packets_for_version(&synch.unwrap(), true);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
-        check_packet_set_contains_version(&synch.as_ref().unwrap(), 3);
+        check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(3); 3]);
 
         safe_buffer
             .lock()
@@ -63,7 +66,7 @@ mod tests {
 
         add_data(safe_buffer.clone(), "c2".to_string(), 4);
         let synch = test_synch.synchronize(safe_buffer.clone());
-        check_packet_set_contains_version(&synch.as_ref().unwrap(), 4);
+        check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(4); 3]);
 
         safe_buffer
             .lock()

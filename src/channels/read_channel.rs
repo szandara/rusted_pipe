@@ -8,10 +8,7 @@ use crossbeam::channel::Sender;
 use crate::{
     buffers::{
         single_buffers::RtRingBuffer,
-        synchronizers::{
-            real_time::RealTimeSynchronizer, timestamp::TimestampSynchronizer, PacketSynchronizer,
-            SynchronizerTypes,
-        },
+        synchronizers::{PacketSynchronizer, SynchronizerTypes},
     },
     packet::work_queue::WorkQueue,
 };
@@ -55,6 +52,8 @@ pub trait ChannelBuffer {
 
     fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
 
+    fn min_version(&self) -> Option<&DataVersion>;
+
     fn peek(&self, channel: &str) -> Option<&DataVersion>;
 
     fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>>;
@@ -92,7 +91,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
             .channels
             .lock()
             .unwrap()
-            .try_receive(Duration::from_millis(10));
+            .try_receive(Duration::from_millis(100));
         match data {
             Ok(has_data) => {
                 if has_data {
@@ -149,8 +148,8 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
     ) -> Self {
         let channels = T::create_channels(channel_buffer_size, block_channel_full);
         let synch_strategy: Box<dyn PacketSynchronizer> = match synchronizer_type {
-            SynchronizerTypes::TIMESTAMP => Box::new(TimestampSynchronizer::default()),
-            SynchronizerTypes::REALTIME => Box::new(RealTimeSynchronizer::default()),
+            SynchronizerTypes::TIMESTAMP(sync) => Box::new(sync),
+            SynchronizerTypes::REALTIME(sync) => Box::new(sync),
         };
         Self {
             synch_strategy,
@@ -181,6 +180,9 @@ pub fn get_data<T>(
     data_version: &Option<DataVersion>,
     exact_match: bool,
 ) -> Option<Packet<T>> {
+    if data_version.is_none() {
+        return None;
+    }
     loop {
         let removed_packet = buffer.pop();
 
