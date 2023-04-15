@@ -13,42 +13,21 @@ For example in a simple autonomous driving system with a lidar and a camera, the
 
 
 
-## More Examples
+## Examples
 
-Check the package Rusted Pipe Examples for real time examples.
+Check out some pipeline examples at https://github.com/szandara/rusted_pipe_examples.
 
-## Key Concepts
+### Synchronization
 
-#### Processor
-A computational transformation consuming one or more inputs and outputting one or more outputs. They can run for an arbitrary long period. However, for real time processing, the longest the computation the worse the result for the user will be.
+Rusted Pipe already offers common syncrhonization strategies but also allows users to create their own. To explain a bit better the problem of synrhonization, below is a graph of one of the graph examples above.
 
-There are 3 different processor types:
-- SourceProcessor: it has no read channel and it's called continuously by the scheduler. SourceProcessors should perform their frame rate control to avoid proucing too much data.
+In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
+- A video producer running at 25 fps
+- A car deep learning model running at 1-5 fps
+- An OCR tesseract model running at ~1 fps
+- A result renderer
 
-- Processor: a processor that has a read channel and an output channel.
-
-- TerminalProcessor: a processor that does not output anything. It only reads and consume data by producing some sort of output like an RTP video or saving to disk.
-
-#### Packet
-A piece of data transported over the pipe. It can be typed or untyped.
-
-#### Data Version
-Each packet contains a payload and a data version that is a timestamp in milliseconds.
-
-#### Node
-A portion of the computational graph. A node is a wrapper around a Processor that embeds a read channel and an output channel.
-
-#### Graph
-A collection of nodes linked together that process the incoming flow.
-
-#### Read Channel
-A typed or untyped set of buffers which map to the expected inputs of the processor. A read channel can have up to 8 typed buffers or an arbitrary amounts if untyped.
-
-#### Write Channel
-A typed or untyped set of buffers which map to an output of the processor. A write channel can have up to 8 typed outputs or an arbitrary amounts if untyped.
-
-#### Synchronizer
-Each read channel has a sychrnonizer chosen by the user, to define a time synch strategy for its incoming data. Synchronizers constantly monitor the read channel buffers and output and schedule work for the node in case a match is found. While users can create their own synchronizers, rusted pipe already offers some common strategies.
+Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. Out of the box Rusted pipe offers the following syncrhonizers:
 
 - TimestampSychronizer: This synchronizer only matches tuple of data if their timestamp match exactly. It's suited for offline computations and data processing. It will try to process any incoming data. If one of the node drops a packat, it might hang the pipeline indefinitely. For that reason buffers should be big enough to account for slow processors.
 
@@ -57,9 +36,12 @@ Each read channel has a sychrnonizer chosen by the user, to define a time synch 
   - tolerance_ms: Milliseconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
   - buffering: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then contnues processing. If out of sync is detected, it re-buffers.
 
+
+
 | TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
-| ![TimestampSychronizer.](docs/synced.gif) | ![RealTimeSynchronizer with buffering.](docs/buffered.gif) | ![RealTimeSynchronizer with wait_all.](docs/wait_realtime.gif) |
+|
+<img src="docs/synced.gif" width="300" height="250"> | <img src="docs/buffered.gif" width="300" height="250"> | <img src="docs/wait_realtime.gif" width="300" height="250"> |
 
 ## Motivations
 
@@ -82,6 +64,40 @@ Gstreamer is not a direct competitor of Rusted Pipe but it's often mentioned as 
 - Nodes interfaces follow the same pattern as Mediapipe with no typing.
 - In general creating your own processing units for GStreamer is complex and the learning curve is high. GStreamer pipeline compilation is relatively hard to understand and relies on OS system libraries to exists.
 - While GStreamer has recently pushed for Rust support the usability has not change.
+
+
+## Key Concepts
+
+### Processor
+A computational transformation consuming one or more inputs and outputting one or more outputs. They can run for an arbitrary long period. However, for real time processing, the longest the computation the worse the result for the user will be.
+
+There are 3 different processor types:
+- SourceProcessor: it has no read channel and it's called continuously by the scheduler. SourceProcessors should perform their frame rate control to avoid proucing too much data.
+
+- Processor: a processor that has a read channel and an output channel.
+
+- TerminalProcessor: a processor that does not output anything. It only reads and consume data by producing some sort of output like an RTP video or saving to disk.
+
+### Packet
+A piece of data transported over the pipe. It can be typed or untyped.
+
+### Data Version
+Each packet contains a payload and a data version that is a timestamp in milliseconds.
+
+### Node
+A portion of the computational graph. A node is a wrapper around a Processor that embeds a read channel and an output channel.
+
+### Graph
+A collection of nodes linked together that process the incoming flow.
+
+### Read Channel
+A typed or untyped set of buffers which map to the expected inputs of the processor. A read channel can have up to 8 typed buffers or an arbitrary amounts if untyped.
+
+### Write Channel
+A typed or untyped set of buffers which map to an output of the processor. A write channel can have up to 8 typed outputs or an arbitrary amounts if untyped.
+
+### Synchronizer
+Each read channel has a sychrnonizer chosen by the user, to define a time synch strategy for its incoming data. Synchronizers constantly monitor the read channel buffers and output and schedule work for the node in case a match is found. While users can create their own synchronizers, rusted pipe already offers some common strategies.
 
 ## Contributing code
 Send pull requests against the client packages in the Kubernetes main [repository](https://github.com/szandara/rustedpipe). 
