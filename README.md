@@ -59,7 +59,7 @@ Each read channel has a sychrnonizer chosen by the user, to define a time synch 
 
 | TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
-| ![TimestampSychronizer.](docs/waiting.gif) | ![RealTimeSynchronizer with buffering.](docs/buffered.gif) | ![RealTimeSynchronizer with wait_all.](docs/waiting.gif) |
+| ![TimestampSychronizer.](docs/synced.gif) | ![RealTimeSynchronizer with buffering.](docs/buffered.gif) | ![RealTimeSynchronizer with wait_all.](docs/waiting.gif) |
 
 ## Motivations
 
