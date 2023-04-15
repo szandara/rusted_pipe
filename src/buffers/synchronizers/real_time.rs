@@ -14,19 +14,19 @@ use std::time::Instant;
 pub struct RealTimeSynchronizer {
     pub tolerance_ms: u128,
     pub wait_all: bool,
-    pub initial_buffering: bool,
+    pub rebuffer: bool,
     has_buffered: bool,
     all_channels_have_data: bool,
     last_returned: Option<u128>,
 }
 
 impl RealTimeSynchronizer {
-    pub fn new(tolerance_ms: u128, wait_all: bool, initial_buffering: bool) -> Self {
-        let has_buffered = !initial_buffering;
+    pub fn new(tolerance_ms: u128, wait_all: bool, buffering: bool) -> Self {
+        let has_buffered = !buffering;
         Self {
             tolerance_ms,
             wait_all,
-            initial_buffering,
+            rebuffer: buffering,
             has_buffered,
             all_channels_have_data: has_buffered,
             last_returned: None,
@@ -226,7 +226,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
         );
 
         if let Some(common_min) = packets {
-            if self.initial_buffering && !self.wait_all {
+            if self.rebuffer && !self.wait_all {
                 println!(
                     "Buffer status has_buffered {}, have_data {}, should_rebuffer {}",
                     self.has_buffered, self.all_channels_have_data, should_rebuffer

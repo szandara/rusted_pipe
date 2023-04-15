@@ -8,7 +8,6 @@ use crate::buffers::single_buffers::RtRingBuffer;
 use crate::buffers::BufferIterator;
 use crate::packet::work_queue::ReadEvent;
 use crate::DataVersion;
-use std::io::Write;
 
 use crossbeam::channel::select;
 use paste::item;
