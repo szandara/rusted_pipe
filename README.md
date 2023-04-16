@@ -38,17 +38,7 @@ Rusted Pipe already offers common syncrhonization strategies but also allows use
   - tolerance_ms: Milliseconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
   - buffering: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then contnues processing. If out of sync is detected, it re-buffers.
 
-To explain a bit better the problem of synchronization, below is a graph of one of the graph examples above.
-
-In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
-- A video producer running at 25 fps.
-- A car deep learning model running at ~0.5 fps.
-- An OCR tesseract model running at ~1 fps.
-- A result renderer thath collects video images and inference results and generates an output.
-
-<img src="docs/graph.png" width="500">
-
-Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. 
+To explain a bit better the problem of synchronization, let's take the graph explained above. Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. 
 
 | TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
