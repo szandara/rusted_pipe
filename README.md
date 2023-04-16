@@ -45,8 +45,7 @@ To explain a bit better the problem of synchronization, let's take the graph exp
 
 | TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
-|
-<img src="docs/synced.gif" width="250" height="190"> | <img src="docs/buffered.gif" width="250" height="190"> | <img src="docs/wait_realtime.gif" width="250" height="190"> |
+|<img src="docs/synced.gif" width="250" height="190"> | <img src="docs/buffered.gif" width="250" height="190"> | <img src="docs/wait_realtime.gif" width="250" height="190"> |
 
 ## Motivations
 
