@@ -142,7 +142,7 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
                 continue;
             }
             if let Some(val) = val {
-                if val.timestamp < min.unwrap().timestamp {
+                if val.timestamp_ns < min.unwrap().timestamp_ns {
                     min = Some(val);
                 }
             }
@@ -275,7 +275,7 @@ mod tests {
         let (mut read_channel, crossbeam_channels) = create_read_channel();
 
         crossbeam_channels
-            .send(Packet::new("my_data".to_string(), DataVersion { timestamp: 1 }).to_untyped())
+            .send(Packet::new("my_data".to_string(), DataVersion { timestamp_ns: 1 }).to_untyped())
             .unwrap();
 
         assert_eq!(
@@ -312,7 +312,7 @@ mod tests {
             senders.push(crossbeam_channels.0);
         }
 
-        let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp: 1 });
+        let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp_ns: 1 });
 
         senders
             .get(0)
@@ -323,7 +323,7 @@ mod tests {
             read_channel.try_receive(Duration::from_millis(50)).unwrap(),
             true
         );
-        packet.version.timestamp = 2;
+        packet.version.timestamp_ns = 2;
         senders
             .get(0)
             .unwrap()
@@ -334,7 +334,7 @@ mod tests {
             true
         );
 
-        packet.version.timestamp = 3;
+        packet.version.timestamp_ns = 3;
         senders.get(0).unwrap().send(packet.to_untyped()).unwrap();
         assert_eq!(
             read_channel

@@ -101,7 +101,7 @@ mod tests {
                 .write(
                     &ChannelID::from("test_channel_fake"),
                     "TestData".to_string(),
-                    &DataVersion { timestamp: 1 }
+                    &DataVersion { timestamp_ns: 1 }
                 )
                 .err()
                 .unwrap(),
@@ -125,7 +125,7 @@ mod tests {
             .write(
                 &ChannelID::from("test_channel_2"),
                 "TestData".to_string(),
-                &DataVersion { timestamp: 1 },
+                &DataVersion { timestamp_ns: 1 },
             )
             .unwrap();
 

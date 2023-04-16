@@ -23,23 +23,23 @@ pub enum PacketError {
 
 #[derive(Debug, Copy, Clone, Hash, Eq, Ord, PartialOrd)]
 pub struct DataVersion {
-    pub timestamp: u128,
+    pub timestamp_ns: u128,
 }
 
 impl DataVersion {
     pub fn from_now() -> Self {
         DataVersion {
-            timestamp: SystemTime::now()
+            timestamp_ns: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_millis(),
+                .as_nanos(),
         }
     }
 }
 
 impl PartialEq for DataVersion {
     fn eq(&self, other: &Self) -> bool {
-        self.timestamp == other.timestamp
+        self.timestamp_ns == other.timestamp_ns
     }
 }
 #[derive(Debug, Copy, Clone)]

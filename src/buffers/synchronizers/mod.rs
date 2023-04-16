@@ -80,7 +80,7 @@ pub mod tests {
         let timestamps = keys
             .map(|v| {
                 if let Some(version) = versions.get(v).unwrap() {
-                    return Some(version.timestamp);
+                    return Some(version.timestamp_ns);
                 }
                 None
             })
@@ -101,7 +101,7 @@ pub mod tests {
         let packet = Packet::<String> {
             data: "data".to_string(),
             version: DataVersion {
-                timestamp: version_timestamp,
+                timestamp_ns: version_timestamp,
             },
         };
         if channel_id == "c1" {

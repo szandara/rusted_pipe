@@ -102,7 +102,7 @@ mod tests {
 
         write_channel
             .c1
-            .write("TestData".to_string(), &DataVersion { timestamp: 1 })
+            .write("TestData".to_string(), &DataVersion { timestamp_ns: 1 })
             .unwrap();
 
         for channel in read_channels {

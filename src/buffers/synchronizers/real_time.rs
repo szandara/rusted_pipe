@@ -12,7 +12,7 @@ use std::time::Instant;
 
 #[derive(Debug, Default, Clone)]
 pub struct RealTimeSynchronizer {
-    pub tolerance_ms: u128,
+    pub tolerance_ns: u128,
     pub wait_all: bool,
     pub rebuffer: bool,
     has_buffered: bool,
@@ -21,10 +21,10 @@ pub struct RealTimeSynchronizer {
 }
 
 impl RealTimeSynchronizer {
-    pub fn new(tolerance_ms: u128, wait_all: bool, buffering: bool) -> Self {
+    pub fn new(tolerance_ns: u128, wait_all: bool, buffering: bool) -> Self {
         let has_buffered = !buffering;
         Self {
-            tolerance_ms,
+            tolerance_ns,
             wait_all,
             rebuffer: buffering,
             has_buffered,
@@ -68,7 +68,7 @@ fn extract_matches(
             if target_match == min || wait_all {
                 println!("Adding {target_match}");
                 matches[i] = Some(DataVersion {
-                    timestamp: target_match,
+                    timestamp_ns: target_match,
                 });
                 continue;
             }
@@ -97,7 +97,7 @@ fn extract_matches(
                 if u_min_min > target_match - min {
                     println!("Adding {target_match}");
                     matches[i] = Some(DataVersion {
-                        timestamp: target_match,
+                        timestamp_ns: target_match,
                     });
                 }
             }
@@ -131,29 +131,22 @@ fn find_common_min<'a>(
 
             for (i, peek) in peekers_loop {
                 if let Some(peek_next) = peek.peek().cloned() {
-                    println!(
-                        "Target {:?}, tolerance {}, Next {i}: {}, min_timestamp {}",
-                        target, tolerance, peek_next.timestamp, min_timestamp
-                    );
-                    if peek_next.timestamp <= min_timestamp {
-                        println!("Dropping {}, {}", i, peek_next.timestamp);
+                    if peek_next.timestamp_ns <= min_timestamp {
                         peek.next();
                         should_rebuffer = true;
                         continue;
                     }
-                    if target + tolerance < peek_next.timestamp {
+                    if target + tolerance < peek_next.timestamp_ns {
                         // Not within tolerance, increment target.
-                        if !target_set.contains(&peek_next.timestamp) {
-                            println!("New Target {i}: {}", peek_next.timestamp);
-                            new_targets.push(Reverse(peek_next.timestamp));
-                            target_set.insert(peek_next.timestamp);
+                        if !target_set.contains(&peek_next.timestamp_ns) {
+                            new_targets.push(Reverse(peek_next.timestamp_ns));
+                            target_set.insert(peek_next.timestamp_ns);
                         }
                         done += 1;
-                    } else if target - min(tolerance, target) <= peek_next.timestamp
-                        && peek_next.timestamp <= target + tolerance
+                    } else if target - min(tolerance, target) <= peek_next.timestamp_ns
+                        && peek_next.timestamp_ns <= target + tolerance
                     {
-                        println!("In tolerance {i}: {}", peek_next.timestamp);
-                        buffers_tolerance[i].push_back(peek_next.timestamp);
+                        buffers_tolerance[i].push_back(peek_next.timestamp_ns);
                         peek.next();
                     } else {
                         peek.next();
@@ -173,24 +166,16 @@ fn find_common_min<'a>(
         if matches.is_none() || wait_all && matches.as_ref().unwrap().contains(&None) {
             if let Some(nt) = new_targets.pop() {
                 target = nt.0;
-                println!("New target {target}");
                 for b in buffers_tolerance.iter_mut() {
                     while b.len() > 0 && b[0] < target - tolerance {
                         b.pop_front();
                     }
                 }
             } else {
-                println!("Returning None in {:?}", Instant::now() - start_duration);
                 return (None, should_rebuffer);
             }
             continue;
         }
-
-        println!(
-            "Returning {:?} in {:?}",
-            matches,
-            Instant::now() - start_duration
-        );
         return (matches, should_rebuffer);
     }
 }
@@ -203,7 +188,6 @@ impl PacketSynchronizer for RealTimeSynchronizer {
         let locked = ordered_buffer.lock().unwrap();
         let min_version = locked.min_version();
         if min_version.is_none() {
-            println!("No data in buffer");
             return None;
         }
         let mut iters = vec![];
@@ -216,21 +200,16 @@ impl PacketSynchronizer for RealTimeSynchronizer {
             wait_all = true;
         }
 
-        println!("Wait all {wait_all}");
         let (packets, should_rebuffer) = find_common_min(
             iters,
-            self.tolerance_ms,
+            self.tolerance_ns,
             self.last_returned.unwrap_or(0),
-            min_version.unwrap().timestamp,
+            min_version.unwrap().timestamp_ns,
             wait_all,
         );
 
         if let Some(common_min) = packets {
             if self.rebuffer && !self.wait_all {
-                println!(
-                    "Buffer status has_buffered {}, have_data {}, should_rebuffer {}",
-                    self.has_buffered, self.all_channels_have_data, should_rebuffer
-                );
                 // initial buffering and wait all does not make much sense.
                 if !self.has_buffered && self.all_channels_have_data && !should_rebuffer {
                     // If we are buffering and all channels had data from a previous sync
@@ -258,8 +237,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
                 .enumerate()
                 .map(|(i, c)| (c.to_string(), common_min.get(i).unwrap().clone()))
                 .collect();
-            println!("Packet {:?}", versions_map);
-            self.last_returned = Some(versions_map.values().max().unwrap().unwrap().timestamp);
+            self.last_returned = Some(versions_map.values().max().unwrap().unwrap().timestamp_ns);
             return Some(versions_map);
         }
 

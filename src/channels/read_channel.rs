@@ -283,7 +283,7 @@ mod tests {
         crossbeam_channels
             .send(Packet::new(
                 "my_data".to_string(),
-                DataVersion { timestamp: 1 },
+                DataVersion { timestamp_ns: 1 },
             ))
             .unwrap();
         read_channel.start(WorkQueue::default());
@@ -296,7 +296,7 @@ mod tests {
                 .try_read()
                 .ok()
                 .unwrap(),
-            DataVersion { timestamp: 1 }
+            DataVersion { timestamp_ns: 1 }
         );
     }
 
@@ -304,7 +304,7 @@ mod tests {
     fn test_untyped_read_channel_try_read_returns_ok_if_data() {
         let (mut read_channel, crossbeam_channels) = create_untyped_read_channel();
         crossbeam_channels
-            .send(Packet::new("my_data".to_string(), DataVersion { timestamp: 1 }).to_untyped())
+            .send(Packet::new("my_data".to_string(), DataVersion { timestamp_ns: 1 }).to_untyped())
             .unwrap();
         read_channel.start(WorkQueue::default());
         assert_eq!(
@@ -316,7 +316,7 @@ mod tests {
                 .unwrap()
                 .try_read()
                 .unwrap(),
-            DataVersion { timestamp: 1 }
+            DataVersion { timestamp_ns: 1 }
         );
 
         assert!(read_channel
@@ -377,15 +377,15 @@ mod tests {
             .c2()
             .link(channel_receiver);
 
-        let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp: 1 });
+        let mut packet = Packet::new("my_data".to_string(), DataVersion { timestamp_ns: 1 });
 
         read_channel.start(WorkQueue::default());
         s1.send(packet.clone()).unwrap();
 
-        packet.version.timestamp = 2;
+        packet.version.timestamp_ns = 2;
         s1.send(packet.clone()).unwrap();
 
-        packet.version.timestamp = 3;
+        packet.version.timestamp_ns = 3;
         s1.send(packet.clone()).unwrap();
         //assert!(read_channel.read("c1".to_string(), done.0));
         assert!(read_channel

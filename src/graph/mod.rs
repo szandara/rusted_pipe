@@ -74,7 +74,7 @@ mod tests {
                 .write(
                     "Test".to_string(),
                     &DataVersion {
-                        timestamp: self.counter as u128,
+                        timestamp_ns: self.counter as u128,
                     },
                 )
                 .unwrap();
@@ -389,8 +389,8 @@ mod tests {
         check_results(&results, expected_versions.len());
 
         for (i, expected_version) in expected_versions.into_iter().enumerate() {
-            let v1 = results[i].c1().unwrap().version.timestamp;
-            let v2 = results[i].c2().unwrap().version.timestamp;
+            let v1 = results[i].c1().unwrap().version.timestamp_ns;
+            let v2 = results[i].c2().unwrap().version.timestamp_ns;
             let range = ((expected_version - 8)..(expected_version + 8)).collect::<Vec<u128>>();
             assert!(
                 range.contains(&v1),
