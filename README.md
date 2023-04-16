@@ -9,13 +9,6 @@ This projects aims at simplifing the creation of inference pipelines. Such syste
 An example graph could be a pipeline for reading car plates in a vidoe feed, which could look like the following graph:
 
 <img src="docs/graph.png" width="500">
-
-In this example there are 4 nodes running at different speed (on an M1 Apple CPU)
-- A video producer running at 25 fps.
-- A car deep learning model running at ~0.5 fps.
-- An OCR tesseract model running at ~1 fps.
-- A result renderer thath collects video images and inference results and generates an output.
-
 Car detector and OCR can run in parallel as they work on the data independently but they produce at different speed. We can also run the sequential but the overall throughput would be slower.
 Finally the result could look like this depending on the synchronization strategy (more on this below).
 
@@ -37,15 +30,23 @@ Rusted Pipe already offers common syncrhonization strategies but also allows use
 - TimestampSychronizer: This synchronizer only matches tuple of data if their timestamp match exactly. It's suited for offline computations and data processing. It will try to process any incoming data. If one of the node drops a packat, it might hang the pipeline indefinitely. For that reason buffers should be big enough to account for slow processors.
 
 - RealTimeSynchronizer: This synchronizer is more suited for real time computations. It deals with potential data loss from slow consumers dropping packets. There are three main variables to control the behavior depending on the user.
-  - wait_all: Only outputs tuple if all buffers in the channel have a match. If false, processors might be called with only some of their read channel data. Processors should take into account lack of data.
-  - tolerance_ms: Milliseconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
-  - buffering: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then contnues processing. If out of sync is detected, it re-buffers.
+  - `wait_all`: Only outputs tuple if all buffers in the channel have a match. If false, processors might be called with only some of their read channel data. Processors should take into account lack of data.
+  - `tolerance_ns`: Nano seconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
+  - `buffering`: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then continues processing. If out of sync is detected, it re-buffers.
 
 To explain a bit better the problem of synchronization, let's take the graph explained above. Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. 
 
+In this example there are 4 nodes running at different speed (on an M1 Apple CPU). This is an artifically bad case since consumers should strive for being fast to keep up with realtime. However, it explains how data is synched.
+
+- A video producer running at 25 fps.
+- A car deep learning model running at ~0.5 fps.
+- An OCR tesseract model running at ~1 fps.
+- A result renderer thath collects video images and inference results and generates an output.
+
+
 | TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
-|<img src="docs/synced.gif" width="250" height="190"> | <img src="docs/buffered.gif" width="250" height="190"> | <img src="docs/wait_realtime.gif" width="250" height="190"> |
+|<img src="docs/synced.gif" width="249" height="190"> | <img src="docs/buffered.gif" width="249" height="190"> | <img src="docs/wait_realtime.gif" width="249" height="190"> |
 
 ## Motivations
 

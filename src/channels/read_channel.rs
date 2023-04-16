@@ -6,10 +6,7 @@ use std::{
 use crossbeam::channel::Sender;
 
 use crate::{
-    buffers::{
-        single_buffers::RtRingBuffer,
-        synchronizers::{PacketSynchronizer, SynchronizerTypes},
-    },
+    buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
     packet::work_queue::WorkQueue,
 };
 
@@ -144,13 +141,9 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         block_channel_full: bool,
         channel_buffer_size: usize,
         process_buffer_size: usize,
-        synchronizer_type: SynchronizerTypes,
+        synch_strategy: Box<dyn PacketSynchronizer>,
     ) -> Self {
         let channels = T::create_channels(channel_buffer_size, block_channel_full);
-        let synch_strategy: Box<dyn PacketSynchronizer> = match synchronizer_type {
-            SynchronizerTypes::TIMESTAMP(sync) => Box::new(sync),
-            SynchronizerTypes::REALTIME(sync) => Box::new(sync),
-        };
         Self {
             synch_strategy,
             work_queue: Some(WorkQueue::<T::INPUT>::new(process_buffer_size)),

@@ -41,11 +41,6 @@ fn get_min_versions<'a>(
     out_map
 }
 
-pub enum SynchronizerTypes {
-    TIMESTAMP(TimestampSynchronizer),
-    REALTIME(RealTimeSynchronizer),
-}
-
 #[cfg(test)]
 pub mod tests {
     use std::{

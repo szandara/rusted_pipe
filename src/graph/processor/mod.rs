@@ -1,9 +1,9 @@
 use std::{fmt, sync::MutexGuard};
 
+use crate::buffers::synchronizers::PacketSynchronizer;
 use crate::channels::WriteChannelTrait;
 use crate::packet::work_queue::WorkQueue;
 use crate::{
-    buffers::synchronizers::SynchronizerTypes,
     channels::{
         read_channel::ReadChannel,
         read_channel::{ChannelBuffer, InputGenerator},
@@ -64,7 +64,7 @@ impl<
         block_channel_full: bool,
         channel_buffer_size: usize,
         process_buffer_size: usize,
-        synchronizer_type: SynchronizerTypes,
+        synchronizer_type: Box<dyn PacketSynchronizer>,
     ) -> Self {
         let write_channel = TypedWriteChannel {
             writer: Box::new(OUTPUT::create()),
@@ -153,7 +153,7 @@ impl<INPUT: InputGenerator + ChannelBuffer + Send + 'static> TerminalNode<INPUT>
         block_channel_full: bool,
         channel_buffer_size: usize,
         process_buffer_size: usize,
-        synchronizer_type: SynchronizerTypes,
+        synchronizer_type: Box<dyn PacketSynchronizer>,
     ) -> Self {
         let read_channel = ReadChannel::<INPUT>::create(
             block_channel_full,
