@@ -10,16 +10,19 @@ An example graph could be a pipeline for reading car plates in a vidoe feed, whi
 
 <img src="docs/graph.png" width="500">
 
-In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
+In this example there are 4 nodes running at different speed (on an M1 Apple CPU)
 - A video producer running at 25 fps.
 - A car deep learning model running at ~0.5 fps.
 - An OCR tesseract model running at ~1 fps.
 - A result renderer thath collects video images and inference results and generates an output.
 
+Car detector and OCR can run in parallel as they work on the data independently but they produce at different speed. We can also run the sequential but the overall throughput would be slower.
 Finally the result could look like this depending on the synchronization strategy (more on this below).
 
 <img src="docs/synced.gif" width="500" height="320">
 
+# What is it not?
+Rusted pipe is not a data processing tool and does not solve other parallelism problems such as data parallelism. For that there are already powerful tools such as [Rayon](https://github.com/rayon-rs/rayon). In fact `Rayon` ca be used inside calculators. Similarly this tool is not a competitor of GStreamer. In the examples you will see how to integrate GStreamer with RustedPipe.
 
 ## Your first pipeline and Examples
 
@@ -70,36 +73,7 @@ Gstreamer is not a direct competitor of Rusted Pipe but it's often mentioned as 
 
 ## Key Concepts
 
-### Processor
-A computational transformation consuming one or more inputs and outputting one or more outputs. They can run for an arbitrary long period. However, for real time processing, the longest the computation the worse the result for the user will be.
-
-There are 3 different processor types:
-- SourceProcessor: it has no read channel and it's called continuously by the scheduler. SourceProcessors should perform their frame rate control to avoid proucing too much data.
-
-- Processor: a processor that has a read channel and an output channel.
-
-- TerminalProcessor: a processor that does not output anything. It only reads and consume data by producing some sort of output like an RTP video or saving to disk.
-
-### Packet
-A piece of data transported over the pipe. It can be typed or untyped.
-
-### Data Version
-Each packet contains a payload and a data version that is a timestamp in milliseconds.
-
-### Node
-A portion of the computational graph. A node is a wrapper around a Processor that embeds a read channel and an output channel.
-
-### Graph
-A collection of nodes linked together that process the incoming flow.
-
-### Read Channel
-A typed or untyped set of buffers which map to the expected inputs of the processor. A read channel can have up to 8 typed buffers or an arbitrary amounts if untyped.
-
-### Write Channel
-A typed or untyped set of buffers which map to an output of the processor. A write channel can have up to 8 typed outputs or an arbitrary amounts if untyped.
-
-### Synchronizer
-Each read channel has a sychrnonizer chosen by the user, to define a time synch strategy for its incoming data. Synchronizers constantly monitor the read channel buffers and output and schedule work for the node in case a match is found. While users can create their own synchronizers, rusted pipe already offers some common strategies.
+See [docs/README.md](docs/README.md)
 
 ## Contributing code
 Send pull requests against the client packages in the Kubernetes main [repository](https://github.com/szandara/rustedpipe). 
