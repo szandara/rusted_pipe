@@ -186,8 +186,6 @@ pub trait SourceProcessor: Sync + Send {
         &mut self,
         output: MutexGuard<TypedWriteChannel<Self::OUTPUT>>,
     ) -> Result<(), RustedPipeError>;
-
-    fn id(&self) -> &String;
 }
 
 pub type ProcessorWriter<'a, T> = MutexGuard<'a, TypedWriteChannel<T>>;
@@ -201,8 +199,6 @@ pub trait Processor: Sync + Send {
         input: <Self::INPUT as InputGenerator>::INPUT,
         output: ProcessorWriter<Self::OUTPUT>,
     ) -> Result<(), RustedPipeError>;
-
-    fn id(&self) -> &String;
 }
 
 pub trait TerminalProcessor: Sync + Send {
@@ -211,6 +207,4 @@ pub trait TerminalProcessor: Sync + Send {
         &mut self,
         input: <Self::INPUT as InputGenerator>::INPUT,
     ) -> Result<(), RustedPipeError>;
-
-    fn id(&self) -> &String;
 }

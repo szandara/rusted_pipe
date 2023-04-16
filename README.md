@@ -19,15 +19,7 @@ Check out some pipeline examples at https://github.com/szandara/rusted_pipe_exam
 
 ### Synchronization
 
-Rusted Pipe already offers common syncrhonization strategies but also allows users to create their own. To explain a bit better the problem of synrhonization, below is a graph of one of the graph examples above.
-
-In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
-- A video producer running at 25 fps
-- A car deep learning model running at 1-5 fps
-- An OCR tesseract model running at ~1 fps
-- A result renderer
-
-Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. Out of the box Rusted pipe offers the following syncrhonizers:
+Rusted Pipe already offers common syncrhonization strategies but also allows users to create their own. Out of the box Rusted pipe offers the following syncrhonizers:
 
 - TimestampSychronizer: This synchronizer only matches tuple of data if their timestamp match exactly. It's suited for offline computations and data processing. It will try to process any incoming data. If one of the node drops a packat, it might hang the pipeline indefinitely. For that reason buffers should be big enough to account for slow processors.
 
@@ -36,12 +28,20 @@ Since all consumers produce data at different times, it's not trivial to make su
   - tolerance_ms: Milliseconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
   - buffering: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then contnues processing. If out of sync is detected, it re-buffers.
 
+To explain a bit better the problem of synrhonization, below is a graph of one of the graph examples above.
 
+In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
+- A video producer running at 25 fps
+- A car deep learning model running at 1-5 fps
+- An OCR tesseract model running at ~1 fps
+- A result renderer
+
+Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. 
 
 | TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
 |
-<img src="docs/synced.gif" width="300" height="250"> | <img src="docs/buffered.gif" width="300" height="250"> | <img src="docs/wait_realtime.gif" width="300" height="250"> |
+<img src="docs/synced.gif" width="250" height="190"> | <img src="docs/buffered.gif" width="250" height="190"> | <img src="docs/wait_realtime.gif" width="250" height="190"> |
 
 ## Motivations
 

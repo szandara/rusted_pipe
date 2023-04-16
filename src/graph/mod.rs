@@ -92,10 +92,6 @@ mod tests {
             self.counter += 1;
             Ok(())
         }
-
-        fn id(&self) -> &String {
-            return &self.id;
-        }
     }
 
     struct TestNodeConsumer {
@@ -136,10 +132,6 @@ mod tests {
             self.output.send(input).unwrap();
             thread::sleep(Duration::from_millis(self.consume_time_ms));
             Ok(())
-        }
-
-        fn id(&self) -> &String {
-            return &self.id;
         }
     }
 
