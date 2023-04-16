@@ -63,7 +63,7 @@ macro_rules! read_channels {
                             .as_ref()
                             .expect(&format!("Channel not connected {} {}",
                                 stringify!($struct_name), stringify!($T))).receiver) -> msg =>
-                                    {println!("On buffer {:?}, got data on channel {:?}", stringify!($struct_name), stringify!($T));Some(self.$T.buffer.insert(msg?))},
+                                    {Some(self.$T.buffer.insert(msg?))},
                     )+
                     default(timeout) => None,
                 };

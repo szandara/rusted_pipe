@@ -6,18 +6,28 @@ Real time processing library for developing multithreaded ML pipelines, written 
 
 This projects aims at simplifing the creation of inference pipelines. Such systems process data streams coming from 1 or more sources and pipe together several processing steps sequentially or in parallel depending on the goal to achieve. These processing steps form a computational graph that runs at high frame rate. Each node of the graph can have more than 1 input necessary for its computation. This software makes the data flow and synchronization a trivial problem for developers.
 
-<!-- 
-For example in a simple autonomous driving system with a lidar and a camera, there would be at least two threads (or processes) that read the cameras' data, then each data is pre-processed in parallel. Finally on ML model is run on the color data to find some car bounding boxes (or others) and then the lidar information can be fused with the inferred bounding boxes to find the distance of each car. Just to solve this naive approach to autonomous driving, you will need several threads that talk to each other and also process data at very different speed. -->
+An example graph could be a pipeline for reading car plates in a vidoe feed, which could look like the following graph:
 
-## Your first pipeline
+<img src="docs/graph.png" width="500">
+
+In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
+- A video producer running at 25 fps.
+- A car deep learning model running at ~0.5 fps.
+- An OCR tesseract model running at ~1 fps.
+- A result renderer thath collects video images and inference results and generates an output.
+
+Finally the result could look like this depending on the synchronization strategy (more on this below).
+
+<img src="docs/synced.gif" width="500" height="320">
 
 
+## Your first pipeline and Examples
 
-## Examples
+Minimal example at https://github.com/szandara/rusted_pipe_examples/tree/master/your_first_pipeline.
 
-Check out some pipeline examples at https://github.com/szandara/rusted_pipe_examples.
+Check out more pipeline examples at https://github.com/szandara/rusted_pipe_examples.
 
-### Synchronization
+## Synchronization
 
 Rusted Pipe already offers common syncrhonization strategies but also allows users to create their own. Out of the box Rusted pipe offers the following syncrhonizers:
 
@@ -28,13 +38,15 @@ Rusted Pipe already offers common syncrhonization strategies but also allows use
   - tolerance_ms: Milliseconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
   - buffering: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then contnues processing. If out of sync is detected, it re-buffers.
 
-To explain a bit better the problem of synrhonization, below is a graph of one of the graph examples above.
+To explain a bit better the problem of synchronization, below is a graph of one of the graph examples above.
 
 In this example there are 4 nodes running at different speed (on an M1 Apple CPU):
-- A video producer running at 25 fps
-- A car deep learning model running at 1-5 fps
-- An OCR tesseract model running at ~1 fps
-- A result renderer
+- A video producer running at 25 fps.
+- A car deep learning model running at ~0.5 fps.
+- An OCR tesseract model running at ~1 fps.
+- A result renderer thath collects video images and inference results and generates an output.
+
+<img src="docs/graph.png" width="500">
 
 Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. 
 

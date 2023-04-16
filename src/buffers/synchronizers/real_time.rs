@@ -40,12 +40,10 @@ fn extract_matches(
 ) -> Option<Vec<Option<DataVersion>>> {
     let iterators_len = buffers.len();
     let mut matches = vec![None; iterators_len];
-    println!("Buffers");
 
     let buffer_min = buffers
         .iter()
         .map(|b| {
-            println!("b {:?}", b);
             if b.len() > 0 {
                 return Some(b[0]);
             } else {
@@ -66,7 +64,6 @@ fn extract_matches(
             }
             let target_match = tolerance[0];
             if target_match == min || wait_all {
-                println!("Adding {target_match}");
                 matches[i] = Some(DataVersion {
                     timestamp_ns: target_match,
                 });
@@ -92,10 +89,9 @@ fn extract_matches(
                     }
                 }
             }
-            println!("min_min {:?}", min_min);
+
             if let Some(u_min_min) = min_min {
                 if u_min_min > target_match - min {
-                    println!("Adding {target_match}");
                     matches[i] = Some(DataVersion {
                         timestamp_ns: target_match,
                     });
@@ -121,7 +117,6 @@ fn find_common_min<'a>(
         iterators.iter_mut().map(|i| i.peekable()).collect();
     let mut new_targets = BinaryHeap::default();
     let mut target_set = HashSet::new();
-    let start_duration = Instant::now();
     loop {
         let mut all_tolerance_or_finished = false;
 
