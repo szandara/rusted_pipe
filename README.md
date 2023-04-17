@@ -44,7 +44,7 @@ In this example there are 4 nodes running at different speed (on an M1 Apple CPU
 - A result renderer thath collects video images and inference results and generates an output.
 
 
-| TimestampSychronizer      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
+| TimestampSychronizer (offline)      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
 | ----------- | ----------- | ----------- |
 |<img src="docs/synced.gif" width="249" height="190"> | <img src="docs/buffered.gif" width="249" height="190"> | <img src="docs/wait_realtime.gif" width="249" height="190"> |
 
