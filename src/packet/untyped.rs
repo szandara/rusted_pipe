@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::PacketError;
 
-use super::{typed::PacketSetTrait, Packet, UntypedPacket, UntypedPacketCast};
+use super::{typed::PacketSetTrait, ChannelID, Packet, UntypedPacket, UntypedPacketCast};
 
 impl UntypedPacketCast for UntypedPacket {
     fn deref_owned<T: 'static>(mut self) -> Result<Packet<Box<T>>, PacketError> {
@@ -24,11 +24,11 @@ impl UntypedPacketCast for UntypedPacket {
 
 #[derive(Default, Debug)]
 pub struct UntypedPacketSet {
-    data: IndexMap<String, Option<UntypedPacket>>,
+    data: IndexMap<ChannelID, Option<UntypedPacket>>,
 }
 
 impl UntypedPacketSet {
-    pub fn new(data: IndexMap<String, Option<UntypedPacket>>) -> Self {
+    pub fn new(data: IndexMap<ChannelID, Option<UntypedPacket>>) -> Self {
         UntypedPacketSet { data }
     }
 
@@ -66,7 +66,7 @@ impl UntypedPacketSet {
 
     pub fn get_channel_owned<T: 'static>(
         &mut self,
-        channel_id: &String,
+        channel_id: &ChannelID,
     ) -> Result<Packet<Box<T>>, PacketError> {
         match self
             .data

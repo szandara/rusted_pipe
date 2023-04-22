@@ -1,3 +1,14 @@
+//! A typed-erased WriteChannel for a set of possible data outputs.
+//! This channel works with UntypedPackets that move around Boxed Any data
+//! which is then converted back into the expected format by the user.
+//!
+//! There is an additional cost in boxing the data and unboxing it plus
+//! casting it to the correct type. Furthermore there is no type safety
+//! at compile type for the creation of your graph.
+//!
+//! On the other hand, these channels can grow their inputs dynamically.
+//! It's possible to add a new channel at any time before the graph is created and
+//! started.
 use std::collections::HashMap;
 
 use super::read_channel::get_data;
@@ -5,6 +16,7 @@ use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
 use super::ChannelError;
+use super::ChannelID;
 use super::UntypedPacket;
 
 use crate::buffers::single_buffers::FixedSizeBuffer;
@@ -15,18 +27,23 @@ use crate::packet::untyped::UntypedPacketSet;
 use crate::packet::Untyped;
 
 use crossbeam::channel::Select;
-use itertools::Itertools;
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 
 unsafe impl Send for UntypedReadChannel {}
 
+/// Untyped ReadChannel structure. The channels are stored as a
+/// map of buffers where each buffer handles data from an incoming channel.
 pub struct UntypedReadChannel {
-    buffered_data: IndexMap<String, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
-    connected_channels: Vec<String>,
+    // Map of channels. Channels are stored as string keys.
+    buffered_data: IndexMap<ChannelID, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
+    // List of connected channels. Internally used.
+    connected_channels: Vec<ChannelID>,
 }
 
 impl UntypedReadChannel {
+    /// A default UntypedReadChannel with no channels.
     pub fn default() -> Self {
         UntypedReadChannel {
             buffered_data: Default::default(),
@@ -34,8 +51,9 @@ impl UntypedReadChannel {
         }
     }
 
+    /// A pre-initialized UntypedReadChannel.
     pub fn new(
-        buffered_data: IndexMap<String, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
+        buffered_data: IndexMap<ChannelID, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
     ) -> Self {
         UntypedReadChannel {
             buffered_data,
@@ -43,58 +61,54 @@ impl UntypedReadChannel {
         }
     }
 
+    /// Add a named channel and its corresponding buffer. The buffer
+    /// will collect all incoming data and serve it to the synchronizer.
     pub fn add_channel(
         &mut self,
-        channel: String,
+        channel: ChannelID,
         receiver: BufferReceiver<RtRingBuffer<Box<Untyped>>>,
-    ) -> Result<String, ChannelError> {
+    ) -> Result<ChannelID, ChannelError> {
         self.buffered_data.insert(channel.clone(), receiver);
         Ok(channel)
     }
 
+    /// Get a reference to a channel if it exists or None.
     pub fn get_channel(
         &self,
-        channel: &str,
+        channel: &ChannelID,
     ) -> Option<&BufferReceiver<RtRingBuffer<Box<Untyped>>>> {
         self.buffered_data.get(channel)
     }
 
+    /// Get a mutable reference to a channel if it exists or None.
     pub fn get_channel_mut(
         &mut self,
-        channel: &str,
+        channel: &ChannelID,
     ) -> Option<&mut BufferReceiver<RtRingBuffer<Box<Untyped>>>> {
         self.buffered_data.get_mut(channel)
-    }
-
-    pub fn available_channels(&self) -> Vec<&String> {
-        self.buffered_data.keys().collect_vec()
     }
 }
 
 impl<'a> ChannelBuffer for UntypedReadChannel {
-    fn available_channels(&self) -> Vec<&str> {
-        self.buffered_data
-            .keys()
-            .into_iter()
-            .map(|key| key.as_str())
-            .collect_vec()
+    fn available_channels(&self) -> Vec<&ChannelID> {
+        self.buffered_data.keys().collect_vec()
     }
 
-    fn has_version(&self, channel: &str, version: &crate::DataVersion) -> bool {
+    fn has_version(&self, channel: &ChannelID, version: &crate::DataVersion) -> bool {
         if let Some(buffer) = self.get_channel(channel) {
             return buffer.buffer.find_version(version).is_some();
         }
         false
     }
 
-    fn peek(&self, channel: &str) -> Option<&crate::DataVersion> {
+    fn peek(&self, channel: &ChannelID) -> Option<&crate::DataVersion> {
         if let Some(buffer) = self.get_channel(channel) {
             return buffer.buffer.peek();
         }
         None
     }
 
-    fn iterator(&self, channel: &str) -> Option<Box<crate::buffers::BufferIterator>> {
+    fn iterator(&self, channel: &ChannelID) -> Option<Box<crate::buffers::BufferIterator>> {
         if let Some(buffer) = self.get_channel(channel) {
             return Some(buffer.buffer.iter());
         }
@@ -156,10 +170,10 @@ impl InputGenerator for UntypedReadChannel {
 
     fn get_packets_for_version(
         &mut self,
-        data_versions: &HashMap<String, Option<DataVersion>>,
+        data_versions: &HashMap<ChannelID, Option<DataVersion>>,
         exact_match: bool,
     ) -> Option<Self::INPUT> {
-        let mut packet_set = IndexMap::<String, Option<UntypedPacket>>::default();
+        let mut packet_set = IndexMap::<ChannelID, Option<UntypedPacket>>::default();
 
         data_versions.iter().for_each(|(channel_id, data_version)| {
             match self.get_channel_mut(&channel_id) {
@@ -200,6 +214,7 @@ mod tests {
     use crate::buffers::BufferError;
     use crate::channels::read_channel::BufferReceiver;
     use crate::channels::read_channel::ChannelBuffer;
+    use crate::channels::ChannelID;
 
     use crate::channels::untyped_channel;
     use crate::channels::untyped_read_channel::UntypedReadChannel;
@@ -228,7 +243,7 @@ mod tests {
         let buffered_data = create_buffer(crossbeam_channels.1);
 
         read_channel
-            .add_channel("test_channel_1".to_string(), buffered_data)
+            .add_channel(ChannelID::from("test_channel_1"), buffered_data)
             .unwrap();
 
         (read_channel, crossbeam_channels.0)
@@ -244,7 +259,7 @@ mod tests {
 
         let buffered_data = create_buffer(crossbeam_channels.1);
         read_channel
-            .add_channel("test3".to_string(), buffered_data)
+            .add_channel(ChannelID::from("test3"), buffered_data)
             .unwrap();
         assert_eq!(read_channel.available_channels().len(), 2);
         assert_eq!(
@@ -258,7 +273,7 @@ mod tests {
         let (read_channel, _) = create_read_channel();
         assert_eq!(
             read_channel
-                .get_channel("test_channel_1")
+                .get_channel(&ChannelID::from("test_channel_1"))
                 .as_ref()
                 .unwrap()
                 .channel
@@ -290,7 +305,7 @@ mod tests {
     fn test_read_channel_try_read_returns_error_when_push_if_not_initialized() {
         let (read_channel, _) = create_read_channel();
         assert!(read_channel
-            .get_channel("test_channel_1")
+            .get_channel(&ChannelID::from("test_channel_1"))
             .as_ref()
             .unwrap()
             .channel
@@ -307,7 +322,7 @@ mod tests {
         for i in 0..2 {
             let crossbeam_channels = untyped_channel();
             let buffered_data = create_buffer(crossbeam_channels.1);
-            let channel = format!("test{}", i);
+            let channel = ChannelID::from(format!("test{}", i));
             read_channel.add_channel(channel, buffered_data).unwrap();
             senders.push(crossbeam_channels.0);
         }
@@ -348,6 +363,8 @@ mod tests {
     #[test]
     fn test_read_channel_fails_if_channel_not_added() {
         let (read_channel, _) = create_read_channel();
-        assert!(read_channel.get_channel("test3").is_none());
+        assert!(read_channel
+            .get_channel(&ChannelID::from("test3"))
+            .is_none());
     }
 }

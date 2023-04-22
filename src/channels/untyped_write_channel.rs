@@ -1,3 +1,14 @@
+//! A typed-erased ReadChannel for a set of possible data outputs.
+//! This channel works with UntypedPackets that move around Boxed Any data
+//! which is then converted back into the expected format by the user.
+//!
+//! There is an additional cost in boxing the data and unboxing it plus
+//! casting it to the correct type. Furthermore there is no type safety
+//! at compile type for the creation of your graph.
+//!
+//! On the other hand, these channels can grow their inputs dynamically.
+//! It's possible to add a new channel at any time before the graph is created and
+//! started.
 use super::ChannelError;
 use super::UntypedSenderChannel;
 use super::WriteChannelTrait;
@@ -7,6 +18,9 @@ use crate::packet::Packet;
 
 use indexmap::{map::Keys, IndexMap};
 
+/// Untyped WriteChannel structure. The channels are stored as a
+/// map of Sender object. Each sender will write into a buffer
+/// from where a ReadChannel can gather data.
 #[derive(Debug, Default)]
 pub struct UntypedBufferWriter {
     channels: IndexMap<ChannelID, Vec<UntypedSenderChannel>>,

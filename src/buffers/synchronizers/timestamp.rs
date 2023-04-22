@@ -1,11 +1,18 @@
-use crate::{channels::read_channel::ChannelBuffer, DataVersion};
+use crate::{
+    channels::{read_channel::ChannelBuffer, ChannelID},
+    DataVersion,
+};
 
-use super::{synchronize, PacketSynchronizer};
+use super::{exact_synchronize, PacketSynchronizer};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
 
+/// A synchronizer mostly used for offline computations. It always tries to match
+/// the minimum version within the ReadChannel. A data timestamp is never jumped over.
+/// It's better to use this moduler only for very determined scenarios when you are sure
+/// that data is never dropped by their producers or consumers.
 #[derive(Debug, Default, Clone)]
 pub struct TimestampSynchronizer {}
 
@@ -13,8 +20,8 @@ impl PacketSynchronizer for TimestampSynchronizer {
     fn synchronize(
         &mut self,
         ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
-    ) -> Option<HashMap<String, Option<DataVersion>>> {
-        synchronize(ordered_buffer.clone())
+    ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
+        exact_synchronize(ordered_buffer.clone())
     }
 }
 

@@ -3,33 +3,67 @@ use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, Rin
 
 type _RingBuffer<T> = AllocRingBuffer<Packet<T>>;
 
+/// Trait describing an input buffer which composes one of the channels of
+/// a ReadChannel.
 pub trait FixedSizeBuffer {
+    /// The data type handled.
     type Data;
 
+    /// True if it contains a query data version.
+    ///
+    /// * Arguments
+    ///
+    /// `version` - Version to match.
+    ///
+    /// * Returns
+    /// True if the data is in the buffer.
     fn contains_key(&self, version: &DataVersion) -> bool;
-
+    /// Get a reference to a data packet by version.
+    ///
+    /// * Arguments
+    ///
+    /// `version` - Version to find.
+    ///
+    /// * Returns
+    /// Some packet data if found or None.
     fn get(&self, version: &DataVersion) -> Option<&Packet<Self::Data>>;
-
+    /// Insert a packet into the buffer. The assumption is that
+    /// no data with a version older than the latest entry is inserted.
+    /// This is how it can guarantee that the buffer is ordered.
+    ///
+    /// * Arguments
+    ///
+    /// `packet` - Data enclosed in a packet.
+    ///
+    /// * Returns
+    /// Ok if the data could be inserted or error in oppostie case.
     fn insert(&mut self, packet: Packet<Self::Data>) -> Result<(), BufferError>;
-
+    /// Current length of the buffer.
     fn len(&self) -> usize;
-
+    /// Peek the head of the buffer, oldest entry in the buffer.
     fn peek(&self) -> Option<&DataVersion>;
-
+    /// Gets an iterator to the data.
     fn iter(&self) -> Box<BufferIterator>;
-
+    /// Removes the head of the buffer, oldest entry in the buffer.
     fn pop(&mut self) -> Option<Packet<Self::Data>>;
-
-    fn check_order(&self, version: u128) -> Result<(), BufferError> {
+    /// Checks if a timestamp would violate the data ordering.
+    /// * Arguments
+    ///
+    /// `timestamp_ns` - Timestamp to test.
+    ///
+    /// * Returns
+    /// Ok if the data could be inserted or error in oppostie case.
+    fn check_order(&self, timestamp_ns: u128) -> Result<(), BufferError> {
         if let Some(p) = self.peek() {
-            if version <= p.timestamp_ns {
-                return Err(BufferError::OutOfOrder(version, p.timestamp_ns));
+            if timestamp_ns <= p.timestamp_ns {
+                return Err(BufferError::OutOfOrder(timestamp_ns, p.timestamp_ns));
             }
         }
         Ok(())
     }
 }
 
+/// An implementation of 'FixedSizeBuffer' using a ring buffer.
 #[derive(Default)]
 pub struct RtRingBuffer<T> {
     buffer: _RingBuffer<T>,
@@ -37,10 +71,13 @@ pub struct RtRingBuffer<T> {
 }
 
 impl<T> RtRingBuffer<T> {
-    pub fn find_version(&self, version: &DataVersion) -> Option<&Packet<T>> {
-        self.buffer.iter().find(|packet| packet.version == *version)
-    }
-
+    /// Creates a new instance.
+    ///
+    /// * Arguments
+    ///
+    /// `max_size` -  The max allowed size in the buffer.
+    /// `block_full` -  Block if full, it would return an error when inserting, if false,
+    /// it will drop oldest data.
     pub fn new(mut max_size: usize, block_full: bool) -> Self {
         if !max_size.is_power_of_two() {
             max_size = 2_usize.pow(max_size.ilog2() / 2_usize.ilog2() + 1);
@@ -49,6 +86,10 @@ impl<T> RtRingBuffer<T> {
             buffer: _RingBuffer::with_capacity(max_size),
             block_full,
         }
+    }
+
+    pub fn find_version(&self, version: &DataVersion) -> Option<&Packet<T>> {
+        self.buffer.iter().find(|packet| packet.version == *version)
     }
 }
 
@@ -96,6 +137,8 @@ use std::collections::BTreeMap;
 
 use super::{BufferError, BufferIterator};
 
+/// An implementation of 'FixedSizeBuffer' using a BTree. The buffer
+/// is indexed by data version and it's ordered.
 pub struct FixedSizeBTree<T> {
     data: BTreeMap<DataVersion, Packet<T>>,
     max_size: usize,
@@ -103,6 +146,8 @@ pub struct FixedSizeBTree<T> {
 }
 
 impl<T> FixedSizeBTree<T> {
+    /// Creates a new instance with a 1000 size and
+    /// will drop if passed.
     pub fn default() -> Self {
         FixedSizeBTree {
             data: Default::default(),
@@ -110,7 +155,13 @@ impl<T> FixedSizeBTree<T> {
             block_full: false,
         }
     }
-
+    /// Creates a new instance.
+    ///
+    /// * Arguments
+    ///
+    /// `max_size` -  The max allowed size in the buffer.
+    /// `block_full` -  Block if full, it would return an error when inserting, if false,
+    /// it will drop oldest data.
     pub fn new(max_size: usize, block_full: bool) -> Self {
         FixedSizeBTree {
             data: Default::default(),

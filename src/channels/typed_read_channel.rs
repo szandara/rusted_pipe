@@ -1,7 +1,11 @@
+//! A typed ReadChannel for a set of possible data inputs.
+//! There are currently only a maximum of 8 typed entry channels.
 use super::read_channel::get_data;
 use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
+use super::ChannelID;
+
 use super::ChannelError;
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
@@ -23,16 +27,17 @@ macro_rules! read_channels {
                 $(
                     $T: BufferReceiver<RtRingBuffer<$T>>,
                 )+
+                channels: Vec<ChannelID>
             }
         }
 
         #[allow(non_camel_case_types)]
-        impl<$($T: Clone),+> ChannelBuffer for $struct_name<$($T),+> {
-            fn available_channels(&self) -> Vec<&str> {
-                vec![$(stringify!($T),)+]
+        impl<$($T: Clone + Send),+> ChannelBuffer for $struct_name<$($T),+> {
+            fn available_channels(&self) -> Vec<&ChannelID> {
+                self.channels.iter().collect()
             }
 
-            fn has_version(&self, channel: &str, version: &DataVersion) -> bool {
+            fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool {
                 $(
                     if channel == stringify!($T) {
                         return self.$T.buffer.get(version).is_some();
@@ -41,7 +46,7 @@ macro_rules! read_channels {
                 false
             }
 
-            fn peek(&self, channel: &str) -> Option<&DataVersion> {
+            fn peek(&self, channel: &ChannelID) -> Option<&DataVersion> {
                 $(
                     if channel == stringify!($T) {
                         return self.$T.buffer.peek();
@@ -70,7 +75,7 @@ macro_rules! read_channels {
                 Ok(has_data.is_some())
             }
 
-            fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>> {
+            fn iterator(&self, channel: &ChannelID) -> Option<Box<BufferIterator>> {
                 $(
                     if channel == stringify!($T) {
                         return Some(self.$T.buffer.iter());
@@ -106,6 +111,7 @@ macro_rules! read_channels {
                     $(
                         $T: BufferReceiver {buffer: Box::new($T), channel: None},
                     )+
+                    channels: vec![$(ChannelID::from(stringify!($T)),)+]
                 }
             }
 
@@ -132,14 +138,14 @@ macro_rules! read_channels {
 
                 fn get_packets_for_version(
                     &mut self,
-                    data_versions: &HashMap<String, Option<DataVersion>>,
+                    data_versions: &HashMap<ChannelID, Option<DataVersion>>,
                     exact_match: bool,
                 ) -> Option<Self::INPUT> {
                     let mut result = [<$struct_name PacketSet>]::<$($T),+>::create();
 
                     $(
-                        let channel = stringify!($T);
-                        let version = data_versions.get(channel).expect("Cannot find channel {channel}");
+                        let channel = ChannelID::from(stringify!($T));
+                        let version = data_versions.get(&channel).expect("Cannot find channel {channel}");
                         let data = get_data(&mut self.$T.buffer, version, exact_match);
                         result.[<set_ $T>](data);
                     )+
@@ -169,7 +175,7 @@ impl InputGenerator for NoBuffer {
 
     fn get_packets_for_version(
         &mut self,
-        _data_versions: &HashMap<String, Option<DataVersion>>,
+        _data_versions: &HashMap<ChannelID, Option<DataVersion>>,
         _exact_match: bool,
     ) -> Option<Self::INPUT> {
         todo!()
@@ -181,7 +187,7 @@ impl InputGenerator for NoBuffer {
 }
 
 impl ChannelBuffer for NoBuffer {
-    fn available_channels(&self) -> Vec<&str> {
+    fn available_channels(&self) -> Vec<&ChannelID> {
         todo!()
     }
 
@@ -189,11 +195,11 @@ impl ChannelBuffer for NoBuffer {
         todo!();
     }
 
-    fn has_version(&self, _: &str, _: &DataVersion) -> bool {
+    fn has_version(&self, _: &ChannelID, _: &DataVersion) -> bool {
         todo!()
     }
 
-    fn peek(&self, _: &str) -> Option<&DataVersion> {
+    fn peek(&self, _: &ChannelID) -> Option<&DataVersion> {
         todo!()
     }
 
@@ -205,7 +211,7 @@ impl ChannelBuffer for NoBuffer {
         todo!()
     }
 
-    fn iterator(&self, _: &str) -> Option<Box<BufferIterator>> {
+    fn iterator(&self, _: &ChannelID) -> Option<Box<BufferIterator>> {
         todo!()
     }
 }

@@ -1,3 +1,8 @@
+//! Module that holds the implementation of a single input buffer for a Node.
+//! An input buffer contains an allocated memory that stores data in different ways depending on
+//! implementation. Buffers offer two main functionalities:
+//! - They are ordered and can be peeked.
+//! - They can drop data or block if full depending on configuration.
 pub mod single_buffers;
 pub mod synchronizers;
 
@@ -26,4 +31,6 @@ pub enum BufferError {
     )]
     OutOfOrder(u128, u128),
 }
+
+/// An iterator over the buffer data.
 pub type BufferIterator<'a> = dyn Iterator<Item = &'a DataVersion> + 'a;

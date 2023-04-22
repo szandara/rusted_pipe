@@ -1,3 +1,16 @@
+//! Module for the channels logic. A channel is an input or output of of a node.
+//! There are two main types: read channel and write channels.
+//!
+//! Read channels are attached to nodes that expect incoming data and each ReadChannel
+//! can have more than one channel.
+//!
+//! Write channels instead allow Nodes to push data out into the graph. A WriteChannel can have one
+//! or more output channels.
+//!
+//! Each type has a typed and a non typed version.
+//! - Typed versions' data is known at compilation time and will catch graph linking at compile time.
+//! - Untyped versions instead have named channels with dynamically typed data. There is an overhead
+//! in using this channel due to type casting and are also less secure at compile time.
 pub mod read_channel;
 pub mod typed_read_channel;
 pub mod typed_write_channel;
@@ -42,6 +55,10 @@ pub enum ChannelError {
     NotInitializedError,
 }
 
+/// Creates an untyped channel set (sender and receiver). An channel
+/// is shared between a ReadChannel and a WriteChannel. The channel has an unbounded
+/// buffer size that grows indefinitely. It can crash the application if not addressed.
+/// These buffers data is generally consumed as fast as possible by the graph.
 pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     let (channel_sender, channel_receiver) = unbounded::<UntypedPacket>();
     (
@@ -50,6 +67,10 @@ pub fn untyped_channel() -> (UntypedSenderChannel, UntypedReceiverChannel) {
     )
 }
 
+/// Creates an typed channel set (sender and receiver). An channel
+/// is shared between a ReadChannel and a WriteChannel. The channel has an unbounded
+/// buffer size that grows indefinitely. It can crash the application if not addressed.
+/// These buffers data is generally consumed as fast as possible by the graph.
 pub fn typed_channel<T>() -> (SenderChannel<T>, ReceiverChannel<T>) {
     let (channel_sender, channel_receiver) = unbounded::<Packet<T>>();
     (
@@ -61,6 +82,7 @@ pub fn typed_channel<T>() -> (SenderChannel<T>, ReceiverChannel<T>) {
 pub type UntypedReceiverChannel = ReceiverChannel<Box<Untyped>>;
 pub type UntypedSenderChannel = SenderChannel<Box<Untyped>>;
 
+/// A receiver channel data struct.
 #[derive(Debug)]
 pub struct ReceiverChannel<T> {
     pub receiver: Receiver<Packet<T>>,
@@ -80,6 +102,7 @@ impl<T> ReceiverChannel<T> {
     }
 }
 
+/// A sender channel data struct.
 #[derive(Debug)]
 pub struct SenderChannel<T> {
     sender: Sender<Packet<T>>,
@@ -101,16 +124,30 @@ impl<T> SenderChannel<T> {
     }
 }
 
+/// A generic trait for WriteChannels
 pub trait WriteChannelTrait {
+    /// Creates a new WriteChannel.
     fn create() -> Self;
 }
 
+/// A generic trait for WriteChannels
 pub trait ReadChannelTrait {
     type Data;
 
+    /// Read incoming data in one of the channels of the ReadChannel.
+    ///
+    /// * Arguments
+    /// `channel_id` -  The string id of the channel.
+    /// `done_notification` - A channel for sending a notification if the buffer has processed
+    /// all data.
     fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool;
 
+    /// Starts the channel buffer.
+    ///
+    /// * Arguments
+    /// `work_queue` -  A queue that holds already paired packet sets.
     fn start(&mut self, work_queue: WorkQueue<Self::Data>);
 
+    /// Stops the channel buffer.
     fn stop(&mut self);
 }

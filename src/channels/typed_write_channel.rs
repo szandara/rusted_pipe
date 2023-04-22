@@ -1,3 +1,5 @@
+//! A typed WriteChannel for a set of possible data outputs.
+//! There are currently only a maximum of 8 typed output channels.
 use super::{ChannelError, Packet, SenderChannel};
 use crate::channels::WriteChannelTrait;
 use crate::DataVersion;

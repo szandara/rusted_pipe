@@ -14,7 +14,7 @@ pub enum PacketError {
     #[error("Received data of unexpected type, was expecting {0:?}")]
     UnexpectedDataType(TypeId),
     #[error("Trying to use a channel which does not exist, channel id {0:?}")]
-    MissingChannel(String),
+    MissingChannel(ChannelID),
     #[error("Trying to use a channel index which does not exist, channel index {0:?}")]
     MissingChannelIndex(usize),
     #[error("Channel has no data {0:?}")]
@@ -68,9 +68,27 @@ impl<T: 'static> Packet<T> {
     }
 }
 
-#[derive(Eq, Hash, Debug, Clone)]
+#[derive(Eq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct ChannelID {
     pub id: String,
+}
+
+impl std::fmt::Display for ChannelID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.id)
+    }
+}
+
+impl From<&&ChannelID> for ChannelID {
+    fn from(f: &&Self) -> Self {
+        Self { id: f.id.clone() }
+    }
+}
+
+impl std::cmp::PartialEq<str> for ChannelID {
+    fn eq(&self, other: &str) -> bool {
+        &self.id == other
+    }
 }
 
 impl ChannelID {

@@ -2,14 +2,28 @@ use super::PacketSynchronizer;
 
 use crate::buffers::BufferIterator;
 use crate::channels::read_channel::ChannelBuffer;
+use crate::channels::ChannelID;
 use crate::DataVersion;
 
 use std::cmp::{min, Reverse};
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::iter::Peekable;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
+/// A synchronizer mostly used for run time computations. It has several configuration
+/// parameters that allow the handling of different use cases when dealing with
+/// eterogeneous consumer latency.
+///
+/// Syncrhonization is done within timestamp windows of a user given tolerance.
+/// This module tries to match the minimum (candidate) next available timestamp in all the buffers
+/// if all other channels have data within the tolerance, a tuple is created and returned.
+/// If not, the synchronizer drops the current candidate to move to the next possible timestamp
+/// as candidate, and so on until a possible tuple is found. If no solution exists it will return
+/// None and keep the data in the buffers.
+///
+/// If one of the data in the buffers is older than the latest shipped minimum, the module
+/// treats this as out of sync, which means that one channel is lagging behind. If configured
+/// the module can occasionally start buffering interally to re-sync the buffers.
 #[derive(Debug, Default, Clone)]
 pub struct RealTimeSynchronizer {
     pub tolerance_ns: u128,
@@ -21,6 +35,20 @@ pub struct RealTimeSynchronizer {
 }
 
 impl RealTimeSynchronizer {
+    /// Creates a new instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `tolerance_ns` - A tolerance in nanoseconds for matching tuples. This value
+    /// makes sure that any returned tuple is within
+    /// (min_timestamp - tolerance_ns) < min_timestamp < (min_timestamp + tolerance_ns)
+    ///
+    /// * `wait_all` - If true, synchronize only returns of all channels in the ReadChannel have data.
+    ///
+    /// * `buffering` - Force the ReadChannel to buffer data if the channels Are out of sync. This can happen
+    /// if the ReadChannel input comes from producers with different latencies. Buffering happens any time
+    /// that an out of sync is detected. An out of sync happens when one of the channel in the ReadChannel
+    /// has to drop data because too old.
     pub fn new(tolerance_ns: u128, wait_all: bool, buffering: bool) -> Self {
         let has_buffered = !buffering;
         Self {
@@ -34,6 +62,7 @@ impl RealTimeSynchronizer {
     }
 }
 
+/// Get a list of lists of timestamp entries and tries to find a synch solution.
 fn extract_matches(
     buffers: &Vec<VecDeque<u128>>,
     wait_all: bool,
@@ -102,6 +131,22 @@ fn extract_matches(
     return Some(matches);
 }
 
+/// Core method of the syncrhonizer that tries to find a matching solution
+/// or returns None otherwise.
+/// It starts from a chosen target that is usually the minumum timestamp among all channels.
+///
+/// * Arguments
+///
+/// * `iterators` - An iterator over all channels.
+/// * `tolerance` - tolerance in nanoseconds.
+/// * `min_timestamp` - Minimum allowed timestamp. Any packet found below this timestamp
+/// would trigger a buffering state and will be dropped.
+/// * `target` - Initial timestamp candidate, typically the minimum over all channels.
+/// * `wait_all` - Only returns if all channels have data.
+///
+/// * Returns
+///
+/// A tuple containing the result of the matching if it exists and a boolean telling if an out of sync was detected.
 fn find_common_min<'a>(
     mut iterators: Vec<Box<BufferIterator>>,
     tolerance: u128,
@@ -179,7 +224,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
     fn synchronize(
         &mut self,
         ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
-    ) -> Option<HashMap<String, Option<DataVersion>>> {
+    ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
         let locked = ordered_buffer.lock().unwrap();
         let min_version = locked.min_version();
         if min_version.is_none() {
@@ -226,11 +271,11 @@ impl PacketSynchronizer for RealTimeSynchronizer {
                 }
             }
 
-            let versions_map: HashMap<String, Option<DataVersion>> = locked
+            let versions_map: HashMap<ChannelID, Option<DataVersion>> = locked
                 .available_channels()
                 .iter()
                 .enumerate()
-                .map(|(i, c)| (c.to_string(), common_min.get(i).unwrap().clone()))
+                .map(|(i, c)| (ChannelID::from(c), common_min.get(i).unwrap().clone()))
                 .collect();
             self.last_returned = Some(versions_map.values().max().unwrap().unwrap().timestamp_ns);
             return Some(versions_map);

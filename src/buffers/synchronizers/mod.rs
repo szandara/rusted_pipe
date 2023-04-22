@@ -1,25 +1,40 @@
+//! Module that deals with data sychornization for a node. Non source nodes have a read channel that
+//! listens to incoming data. Read Channels have a set of input channels that vary depending on the node.
+//! The amount of input channels is reflected in the Processor 'handle' method.
+//! Synchronizers are modules that decide when to create a packet set to feed to the handle method. A packet set
+//! contains a tuple of data mapped by their channel number. Depending on their configuration
+//! synchronizers can generate packet set with empty data but the processor must be ready to handle the lack of data.
+//! It's up to the user to create a pipeline with the right synchorization.
+
 pub mod real_time;
 pub mod timestamp;
 
 use crate::channels::read_channel::ChannelBuffer;
+use crate::channels::ChannelID;
 use crate::DataVersion;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use self::real_time::RealTimeSynchronizer;
-use self::timestamp::TimestampSynchronizer;
-
+/// Trait that defines how a synchronizer must behave.
 pub trait PacketSynchronizer: Send {
+    /// Accepts a reference to a Channel Buffer that has
+    /// access to the ReadChannel buffer and returns an optional set of
+    /// packets for each channel.
+    ///
+    /// If no synchronization is possible it returns None.
+    /// If a synchronization is possible a HashMap with one entry per channel
+    /// and an optional data entry for that channel is returned.
     fn synchronize(
         &mut self,
         ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
-    ) -> Option<HashMap<String, Option<DataVersion>>>;
+    ) -> Option<HashMap<ChannelID, Option<DataVersion>>>;
 }
 
-fn synchronize(
+/// Synchronize a read channel if the minimum entry has an exact match in each channel.
+fn exact_synchronize(
     ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
-) -> Option<HashMap<String, Option<DataVersion>>> {
+) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
 
     let version = min_version.values().next().unwrap();
@@ -29,14 +44,15 @@ fn synchronize(
     None
 }
 
+/// Gets the minimum version of each buffer in the channel.
 fn get_min_versions<'a>(
     buffer: Arc<Mutex<dyn ChannelBuffer + 'a>>,
-) -> HashMap<String, Option<DataVersion>> {
+) -> HashMap<ChannelID, Option<DataVersion>> {
     let buffer = buffer.lock().unwrap();
-    let mut out_map = HashMap::<String, Option<DataVersion>>::default();
+    let mut out_map = HashMap::<ChannelID, Option<DataVersion>>::default();
 
     for channel in buffer.available_channels().iter() {
-        out_map.insert(channel.to_string(), buffer.peek(channel).cloned());
+        out_map.insert(ChannelID::from(channel), buffer.peek(channel).cloned());
     }
     out_map
 }
@@ -53,9 +69,9 @@ pub mod tests {
     use crate::{
         buffers::{
             single_buffers::{FixedSizeBuffer, RtRingBuffer},
-            synchronizers::synchronize,
+            synchronizers::exact_synchronize,
         },
-        channels::{typed_read_channel::ReadChannel3, Packet},
+        channels::{typed_read_channel::ReadChannel3, ChannelID, Packet},
         DataVersion,
     };
 
@@ -68,7 +84,7 @@ pub mod tests {
     }
 
     pub fn check_packet_set_contains_versions(
-        versions: &HashMap<String, Option<DataVersion>>,
+        versions: &HashMap<ChannelID, Option<DataVersion>>,
         expected_versions: Vec<Option<u128>>,
     ) {
         let keys = versions.keys().sorted();
@@ -135,7 +151,7 @@ pub mod tests {
         add_data(safe_buffer.clone(), "c1".to_string(), 2);
         add_data(safe_buffer.clone(), "c1".to_string(), 3);
 
-        let packet_set = synchronize(safe_buffer.clone());
+        let packet_set = exact_synchronize(safe_buffer.clone());
         assert!(packet_set.is_none());
     }
 }

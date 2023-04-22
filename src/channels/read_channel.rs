@@ -1,3 +1,7 @@
+//! Module for the generic ReadChannel. A ReadChannel is used by processing nodes
+//! to receive input data while waiting idle. Reach channels' main logic is to
+//! allocate space for the incoming data and synchronize that data using the
+//! user configured syncrhonizer.
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -18,14 +22,21 @@ use crate::{
     DataVersion,
 };
 
-use super::{ChannelError, Packet, ReadChannelTrait, ReceiverChannel};
+use super::{ChannelError, ChannelID, Packet, ReadChannelTrait, ReceiverChannel};
 
+/// A struct that holds a single FixedSizeBuffer and
+/// an optional ReceiverChannel that maps its data into that buffer.
 pub struct BufferReceiver<T: FixedSizeBuffer + ?Sized> {
+    /// The fixed buffer implementation.
     pub buffer: Box<T>,
+    /// An optional ReceiverChannel with the data type.
+    /// It can be None if the channel is not yet connected.
     pub channel: Option<ReceiverChannel<T::Data>>,
 }
 
 impl<T: FixedSizeBuffer + ?Sized> BufferReceiver<T> {
+    /// Link a receiver channel to a data transport. From now on
+    /// the channel can start reading data.
     pub fn link(&mut self, receiver: ReceiverChannel<T::Data>) {
         if self.channel.is_some() {
             panic!("Channel is already linked!");
@@ -33,6 +44,8 @@ impl<T: FixedSizeBuffer + ?Sized> BufferReceiver<T> {
         self.channel = Some(receiver);
     }
 
+    /// Tries to read data from the data transport channel or an error
+    /// it the channel has no connection yet.
     pub fn try_read(&mut self) -> Result<DataVersion, ChannelError> {
         if let Some(channel) = self.channel.as_ref() {
             let packet = channel.try_receive()?;
@@ -44,36 +57,66 @@ impl<T: FixedSizeBuffer + ?Sized> BufferReceiver<T> {
     }
 }
 
+/// A trait for buffer data manipulation. Mostly used by the synchronizer
+/// to find matching tuples.
 pub trait ChannelBuffer {
-    fn available_channels(&self) -> Vec<&str>;
-
-    fn has_version(&self, channel: &str, version: &DataVersion) -> bool;
-
+    /// A list of named channels.
+    fn available_channels(&self) -> Vec<&ChannelID>;
+    /// True if a channel has the given data version.
+    ///
+    /// * Arguments
+    /// `channel` - The name of the channel to inquire.
+    /// `version` - The data version to find.
+    fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
+    /// Gets the minimum version over all channels.
     fn min_version(&self) -> Option<&DataVersion>;
-
-    fn peek(&self, channel: &str) -> Option<&DataVersion>;
-
-    fn iterator(&self, channel: &str) -> Option<Box<BufferIterator>>;
-
+    /// Returns a reference of the head of the buffer in `channel`.
+    ///
+    /// * Arguments
+    /// `channel` - The name of the channel to inquire.
+    fn peek(&self, channel: &ChannelID) -> Option<&DataVersion>;
+    /// Returns an iterator in `channel`.
+    ///
+    /// * Arguments
+    /// `channel` - The name of the channel to inquire.
+    fn iterator(&self, channel: &ChannelID) -> Option<Box<BufferIterator>>;
+    /// Returns true if there is no data in any buffer.
     fn are_buffers_empty(&self) -> bool;
-
+    /// Tries to read data for up to 'timeout' duration.
+    ///
+    /// * Arguments
+    /// `timeout` - How long to wait for the data.
     fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
 }
 
+/// A trait for generating packet set from an existing ReadChannel.
 pub trait InputGenerator {
     type INPUT: PacketSetTrait + Send;
+    /// Pulls the data specified in data_versions out from the buffers.
+    /// For each channel it drops the data before the chosen version.
+    ///
+    /// * Arguments
+    /// `data_versions` - A map containing a channel name an an optional data version.
+    /// `exact_match` - Only returns data if an exact match exists.
+    ///
+    /// Returns None if the data cannot be fetched.
     fn get_packets_for_version(
         &mut self,
-        data_versions: &HashMap<String, Option<DataVersion>>,
+        data_versions: &HashMap<ChannelID, Option<DataVersion>>,
         exact_match: bool,
     ) -> Option<Self::INPUT>;
 
     fn create_channels(buffer_size: usize, block_on_full: bool) -> Self;
 }
 
+/// A generic ReadChannel that holds a reference to a struct that has
+/// a set of trait for managing the internal channels.
 pub struct ReadChannel<T: InputGenerator + ChannelBuffer + Send> {
+    /// What synch strategy to use when trying to synchronize the buffers.
     pub synch_strategy: Box<dyn PacketSynchronizer>,
+    /// A work queue that holds the already matched tuples.
     pub work_queue: Option<WorkQueue<T::INPUT>>,
+    /// A reference to the channels of the ReadChannel.
     pub channels: Arc<Mutex<T>>,
 }
 
@@ -205,6 +248,7 @@ mod tests {
     use crate::channels::read_channel::ReadChannel;
     use crate::channels::read_channel::ReadChannelTrait;
     use crate::channels::typed_channel;
+    use crate::channels::ChannelID;
     use crate::channels::ReceiverChannel;
     use crate::channels::SenderChannel;
 
@@ -264,7 +308,10 @@ mod tests {
             .channels
             .lock()
             .unwrap()
-            .add_channel("test0".to_string(), create_untyped_buffer(channel_receiver))
+            .add_channel(
+                ChannelID::from("test0"),
+                create_untyped_buffer(channel_receiver),
+            )
             .unwrap();
 
         (read_channel, channel_sender)
@@ -305,7 +352,7 @@ mod tests {
                 .channels
                 .lock()
                 .unwrap()
-                .get_channel_mut("test0")
+                .get_channel_mut(&ChannelID::from("test0"))
                 .unwrap()
                 .try_read()
                 .unwrap(),
@@ -316,7 +363,7 @@ mod tests {
             .channels
             .lock()
             .unwrap()
-            .get_channel_mut("test0")
+            .get_channel_mut(&ChannelID::from("test0"))
             .unwrap()
             .try_read()
             .is_err());
