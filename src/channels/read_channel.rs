@@ -8,6 +8,7 @@ use std::{
 };
 
 use crossbeam::channel::Sender;
+use log::debug;
 
 use crate::{
     buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
@@ -149,7 +150,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                         return false;
                     }
                     _ => {
-                        eprintln!("Sending done {channel_id}");
+                        debug!("Sending done {channel_id}");
                         if self.channels.lock().unwrap().are_buffers_empty() {
                             done_notification.send(channel_id).unwrap();
                         }

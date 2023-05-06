@@ -29,6 +29,14 @@ pub struct UntypedBufferWriter {
 unsafe impl Send for UntypedBufferWriter {}
 
 impl UntypedBufferWriter {
+    /// Write data into one of the buffers.
+    ///
+    /// * Arguments
+    ///
+    /// `channel_id` - Which channel to write into, throws error if does not exists.
+    /// `data` - A typed data that will be written in the channel. Data is boxed and transformed
+    /// into UntypedPacket.
+    /// `version` - The data version.
     pub fn write<T: 'static + Clone>(
         &self,
         channel_id: &ChannelID,

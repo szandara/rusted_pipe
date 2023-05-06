@@ -5,7 +5,6 @@ use std::{
     time::Duration,
 };
 
-use crate::channels::ReadChannelTrait;
 use crate::channels::WriteChannelTrait;
 use crate::channels::{typed_read_channel::NoBuffer, typed_write_channel::WriteChannel1};
 use crate::{
@@ -17,15 +16,18 @@ use crate::{
     },
     graph::{
         processor::Processors,
-        runtime::{consume, read_channel_data},
+        runtime::{read_channel_data, ConsumerThread},
     },
     RustedPipeError,
 };
+use crate::{channels::ReadChannelTrait, graph::metrics::ProfilerTag};
 use atomic::{Atomic, Ordering};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use itertools::Itertools;
+use log::debug;
 
 use super::{
+    metrics::Metrics,
     processor::{Node, Nodes, SourceNode, TerminalNode},
     runtime::Wait,
 };
@@ -39,6 +41,7 @@ pub struct Graph {
     read_threads: HashMap<String, JoinHandle<()>>,
     worker_done: (Sender<String>, Receiver<String>),
     reader_empty: (Sender<String>, Receiver<String>),
+    metrics: Metrics,
 }
 
 pub fn link<U: Clone + 'static>(
@@ -53,7 +56,7 @@ pub fn link<U: Clone + 'static>(
 }
 
 impl Graph {
-    pub fn new() -> Self {
+    pub fn new(metrics_backend: Metrics) -> Self {
         Graph {
             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
             thread_control: vec![],
@@ -62,6 +65,7 @@ impl Graph {
             read_threads: Default::default(),
             worker_done: unbounded::<String>(),
             reader_empty: unbounded::<String>(),
+            metrics: metrics_backend,
         }
     }
 
@@ -80,7 +84,7 @@ impl Graph {
     ) -> (String, ProcessorWorker<INPUT, OUTPUT>) {
         let reading_running_thread = self.running.clone();
         match node {
-            Nodes::NodeHandler(node) => {
+            Nodes::Node(node) => {
                 let (id, work_queue, mut read_channel, handler, write_channel) = (
                     node.id,
                     node.work_queue,
@@ -115,7 +119,7 @@ impl Graph {
                     },
                 )
             }
-            Nodes::SourceHandler(node) => (
+            Nodes::SourceNode(node) => (
                 node.id.clone(),
                 ProcessorWorker {
                     work_queue: None,
@@ -124,7 +128,7 @@ impl Graph {
                     status: Arc::new(Atomic::new(WorkerStatus::Idle)),
                 },
             ),
-            Nodes::TerminalHandler(node) => {
+            Nodes::TerminalNode(node) => {
                 let (id, work_queue, mut read_channel, handler) =
                     (node.id, node.work_queue, node.read_channel, node.handler);
                 read_channel.start(work_queue.clone());
@@ -156,7 +160,7 @@ impl Graph {
         &mut self,
         node: SourceNode<OUTPUT>,
     ) {
-        self._start_node::<NoBuffer, OUTPUT>(Nodes::SourceHandler(Box::new(node)));
+        self._start_node::<NoBuffer, OUTPUT>(Nodes::SourceNode(Box::new(node)));
     }
 
     pub fn start_node<
@@ -166,14 +170,14 @@ impl Graph {
         &mut self,
         node: Node<INPUT, OUTPUT>,
     ) {
-        self._start_node::<INPUT, OUTPUT>(Nodes::NodeHandler(Box::new(node)));
+        self._start_node::<INPUT, OUTPUT>(Nodes::Node(Box::new(node)));
     }
 
     pub fn start_terminal_node<INPUT: Send + InputGenerator + ChannelBuffer + 'static>(
         &mut self,
         node: TerminalNode<INPUT>,
     ) {
-        self._start_node::<INPUT, WriteChannel1<String>>(Nodes::TerminalHandler(Box::new(node)));
+        self._start_node::<INPUT, WriteChannel1<String>>(Nodes::TerminalNode(Box::new(node)));
     }
 
     fn _start_node<
@@ -195,19 +199,32 @@ impl Graph {
         let wait_clone = wait.clone();
         let thread_clone = self.pool.clone();
         let id_move = node_id.clone();
+
+        let profiler: Option<_> = match self.metrics.profiler().as_ref() {
+            Some(profiler) => Some(profiler.profiler.tag_wrapper()),
+            None => None,
+        };
+
         if self
             .node_threads
             .insert(
                 node_id.clone(),
                 thread::spawn(move || {
-                    consume(
+                    let profiler_tag = match profiler {
+                        Some(taggers) => ProfilerTag::from_tuple(taggers),
+                        None => ProfilerTag::no_profiler(),
+                    };
+
+                    let consumer = ConsumerThread::new(
                         id_move,
                         consume_running_thread,
                         wait_clone,
                         worker,
                         done_channel,
                         thread_clone,
-                    )
+                        profiler_tag,
+                    );
+                    consumer.consume();
                 }),
             )
             .is_some()
@@ -219,7 +236,7 @@ impl Graph {
         println!("Done Starting Node {node_id}");
     }
 
-    pub fn stop(&mut self, wait_for_data: bool, timeout: Option<Duration>) {
+    pub fn stop(mut self, wait_for_data: bool, timeout: Option<Duration>) {
         let mut empty_set = HashSet::new();
         let mut empty_receiver_set = HashSet::new();
 
@@ -233,7 +250,7 @@ impl Graph {
                 .iter()
                 .all(|n| empty_set.contains(n.0.as_str()))
             {
-                println!(
+                debug!(
                     "Waiting node threads received done from {} out of {}",
                     empty_set.len(),
                     self.node_threads.len()
@@ -251,7 +268,7 @@ impl Graph {
                 .iter()
                 .all(|n| empty_set.contains(n.0.as_str()))
             {
-                println!(
+                debug!(
                     "Waiting reader threads received done from {} out of {}",
                     empty_receiver_set.len(),
                     self.read_threads.len()
@@ -277,6 +294,8 @@ impl Graph {
         for id in keys {
             self.read_threads.remove(&id).unwrap().join().unwrap();
         }
+
+        self.metrics.stop();
     }
 }
 

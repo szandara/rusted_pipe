@@ -1,4 +1,5 @@
 pub mod graph;
+pub mod metrics;
 pub mod processor;
 pub mod runtime;
 
