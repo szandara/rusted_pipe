@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Condvar, Mutex},
-    thread::{self, JoinHandle},
+    thread::{self, available_parallelism, JoinHandle},
     time::Duration,
 };
 
@@ -25,6 +25,7 @@ use atomic::{Atomic, Ordering};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use itertools::Itertools;
 use log::debug;
+use rusty_pool::ThreadPool;
 
 use super::{
     metrics::Metrics,
@@ -36,7 +37,7 @@ use crate::packet::work_queue::WorkQueue;
 pub struct Graph {
     running: Arc<Atomic<GraphStatus>>,
     thread_control: Vec<Wait>,
-    pool: futures::executor::ThreadPool,
+    pool: ThreadPool,
     node_threads: HashMap<String, JoinHandle<()>>,
     read_threads: HashMap<String, JoinHandle<()>>,
     worker_done: (Sender<String>, Receiver<String>),
@@ -60,7 +61,7 @@ impl Graph {
         Graph {
             running: Arc::new(Atomic::<GraphStatus>::new(GraphStatus::Running)),
             thread_control: vec![],
-            pool: futures::executor::ThreadPool::new().expect("Failed to build pool"),
+            pool: ThreadPool::default(),
             node_threads: Default::default(),
             read_threads: Default::default(),
             worker_done: unbounded::<String>(),

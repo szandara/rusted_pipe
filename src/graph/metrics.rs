@@ -117,6 +117,27 @@ impl Metrics {
             pyroscope_agent: None,
         }
     }
+
+    pub fn builder() -> Self {
+        Metrics {
+            metrics_server: None,
+            pyroscope_agent: None,
+        }
+    }
+
+    pub fn with_pyroscope(self, pyroscope_server_addr: &str) -> Self {
+        Metrics {
+            metrics_server: self.metrics_server,
+            pyroscope_agent: Some(create_profiler_agent(pyroscope_server_addr)),
+        }
+    }
+
+    pub fn with_prometheus(self, prometheus_addr: &str) -> Self {
+        Metrics {
+            metrics_server: Some(spawn_metrics_server(prometheus_addr)),
+            pyroscope_agent: self.pyroscope_agent,
+        }
+    }
 }
 
 pub struct MetricsServer {
@@ -143,6 +164,19 @@ impl Profiler {
     }
 }
 
+pub fn create_profiler_agent(pyroscope_server_addr: &str) -> Profiler {
+    // Configure Pyroscope Agent
+    let agent = PyroscopeAgent::builder(pyroscope_server_addr, "rusted_pipe")
+        .backend(pprof_backend(PprofConfig::new().sample_rate(100)))
+        .build()
+        .expect("Cannot start Pyroscope server");
+    let agent_running = agent.start().unwrap();
+    println!("Sending Pyroscope data to {pyroscope_server_addr}");
+    Profiler {
+        profiler: agent_running,
+    }
+}
+
 /// Creates tools for metrics and profiling.
 ///
 /// Args
@@ -151,7 +185,7 @@ impl Profiler {
 ///
 /// - pyroscope_server_addr: Address of the remote Pyroscope server. The data is sent in push mode
 /// to the server and usually adds 2% overhead.
-pub fn spawn_metrics_server(prometheus_addr: &str, pyroscope_server_addr: &str) -> Metrics {
+pub fn spawn_metrics_server(prometheus_addr: &str) -> MetricsServer {
     let stopper_arc = Arc::new(AtomicBool::default());
     let stopper_clone = stopper_arc.clone();
     let prometheus_str = prometheus_addr.to_string();
@@ -182,23 +216,8 @@ pub fn spawn_metrics_server(prometheus_addr: &str, pyroscope_server_addr: &str) 
         }));
     });
 
-    // Configure Pyroscope Agent
-
-    let agent = PyroscopeAgent::builder(pyroscope_server_addr, "rusted_pipe")
-        .backend(pprof_backend(PprofConfig::new().sample_rate(100)))
-        .tags(vec![("ApplicationType", "rusted_pipe")])
-        .build()
-        .expect("Cannot start Pyroscope server");
-    let agent_running = agent.start().unwrap();
-    println!("Sending Pyroscope data to {pyroscope_server_addr}");
-
-    return Metrics {
-        metrics_server: Some(MetricsServer {
-            join: handle,
-            prometheus_stopper: stopper_arc.clone(),
-        }),
-        pyroscope_agent: Some(Profiler {
-            profiler: agent_running,
-        }),
-    };
+    MetricsServer {
+        join: handle,
+        prometheus_stopper: stopper_arc.clone(),
+    }
 }

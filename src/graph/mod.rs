@@ -7,6 +7,7 @@ pub mod runtime;
 mod tests {
     use super::graph::link;
     use super::graph::Graph;
+    use super::metrics::Metrics;
     use super::processor::SourceNode;
     use super::processor::SourceProcessor;
     use super::processor::TerminalNode;
@@ -137,7 +138,7 @@ mod tests {
     }
 
     fn setup_test() -> Graph {
-        Graph::new()
+        Graph::new(Metrics::no_metrics())
     }
 
     fn create_source_node(producer: TestNodeProducer) -> SourceNode<WriteChannel1<String>> {
@@ -241,7 +242,7 @@ mod tests {
             max_packets,
         );
 
-        let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
+        let (graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
         let deadline = Instant::now() + Duration::from_millis(700);

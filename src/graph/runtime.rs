@@ -16,6 +16,7 @@ use crossbeam::channel::Sender;
 use log::debug;
 use prometheus::register_histogram;
 use prometheus::Histogram;
+use rusty_pool::ThreadPool;
 use std::{
     sync::{Arc, Condvar, Mutex},
     thread,
@@ -49,7 +50,7 @@ where
     _free: Wait,
     worker: ProcessorWorker<INPUT, OUTPUT>,
     done_notification: Sender<String>,
-    thread_pool: futures::executor::ThreadPool,
+    thread_pool: ThreadPool,
     metrics_timer: Histogram,
     profiler: Arc<ProfilerTag>,
 }
@@ -65,7 +66,7 @@ where
         free: Wait,
         worker: ProcessorWorker<INPUT, OUTPUT>,
         done_notification: Sender<String>,
-        thread_pool: futures::executor::ThreadPool,
+        thread_pool: ThreadPool,
         profiler: ProfilerTag,
     ) -> Self {
         let metrics_timer = register_histogram!(id.clone(), format!("Timing for node: {}", &id))
@@ -84,6 +85,7 @@ where
     }
 
     pub(super) fn consume(&self) {
+        self.profiler.add("consumer".to_string(), self.id.clone());
         while self.running.load(Ordering::Relaxed) != GraphStatus::Terminating {
             if self.worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
                 let lock_status = self.worker.status.clone();
@@ -114,10 +116,8 @@ where
                 let arc_write_channel = self.worker.write_channel.clone();
                 let done_clone = self.done_notification.clone();
                 let metrics_clone = self.metrics_timer.clone();
-                let profiler_clone = self.profiler.clone();
-                let future = async move {
-                    profiler_clone.add("consumer".to_string(), id_thread.clone());
 
+                let future = move || {
                     let timer = metrics_clone.start_timer();
                     let result = match &mut *processor_clone.lock().unwrap() {
                         Processors::Processor(proc) => {
@@ -128,7 +128,6 @@ where
                             proc.handle(arc_write_channel.unwrap().lock().unwrap())
                         }
                     };
-                    profiler_clone.remove("consumer".to_string(), id_thread.clone());
                     timer.observe_duration();
                     match result {
                         Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
@@ -139,15 +138,24 @@ where
                         }
                         Err(err) => {
                             eprintln!("Error in worker {id_thread:?}: {err:?}");
-                            lock_status.store(WorkerStatus::Idle, Ordering::Relaxed)
+                            lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
                         }
-                    }
+                    };
+                    ()
                 };
 
-                self.thread_pool.spawn_ok(future);
+                let handle = self.thread_pool.evaluate(future);
+                if let Err(_) = handle.try_await_complete() {
+                    eprintln!("Thread panicked in worker {:?}", self.id.clone());
+                    self.worker
+                        .status
+                        .store(WorkerStatus::Idle, Ordering::Relaxed);
+                }
             }
             // Looping until the application is not shut down.
-            thread::sleep(Duration::from_millis(5));
+            thread::sleep(Duration::from_millis(50));
         }
+        self.profiler
+            .remove("consumer".to_string(), self.id.clone());
     }
 }
