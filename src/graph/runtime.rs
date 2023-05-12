@@ -21,7 +21,7 @@ use rusty_pool::ThreadPool;
 use std::{
     sync::{Arc, Condvar, Mutex},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 lazy_static! {
@@ -116,14 +116,6 @@ where
                         continue;
                     }
                 }
-                println!(
-                    "Work {} {}",
-                    self.id,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_nanos()
-                );
                 self.worker
                     .status
                     .store(WorkerStatus::Running, Ordering::Relaxed);
@@ -136,14 +128,6 @@ where
 
                 let future = move || {
                     let timer = metrics_clone.start_timer();
-                    println!(
-                        "Thread {}, {}",
-                        &id_thread,
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_nanos()
-                    );
                     let result = match &mut *processor_clone.lock().unwrap() {
                         Processors::Processor(proc) => {
                             proc.handle(packet.unwrap(), arc_write_channel.unwrap().lock().unwrap())
@@ -178,6 +162,10 @@ where
                 }
             } else {
                 thread::sleep(Duration::from_millis(100));
+                if self.running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
+                    debug!("Sending done {}", self.id);
+                    self.done_notification.send(self.id.clone()).unwrap();
+                }
             }
         }
         self.profiler

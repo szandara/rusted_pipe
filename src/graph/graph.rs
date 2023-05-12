@@ -295,7 +295,7 @@ impl Graph {
         for id in keys {
             self.read_threads.remove(&id).unwrap().join().unwrap();
         }
-
+        println!("Waiting for metrics to stop",);
         self.metrics.stop();
     }
 }

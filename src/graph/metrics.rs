@@ -1,19 +1,7 @@
-use bytes::Bytes;
-
-use http_body_util::Full;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper::{Request, Response};
-use prometheus::{Encoder, TextEncoder};
-
+use prometheus_exporter::Exporter;
 use pyroscope::pyroscope::PyroscopeAgentRunning;
 use pyroscope::PyroscopeAgent;
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
-
-use std::net::TcpListener;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
-use std::thread;
 
 pub const MACOS_DOCKER_ADDRESS: &str = "host.docker.internal";
 pub const LOCALHOST: &str = "127.0.0.1";
@@ -59,20 +47,6 @@ impl ProfilerTag {
     }
 }
 
-// An async function that consumes a request, does nothing with it and returns a
-// response.
-async fn metric_service(
-    _: Request<hyper::body::Incoming>,
-) -> Result<Response<Full<Bytes>>, hyper::http::Error> {
-    let encoder = TextEncoder::new();
-    let mut buffer = vec![];
-    let mf = prometheus::gather();
-    encoder.encode(&mf, &mut buffer).unwrap();
-    Response::builder()
-        .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-        .body(Full::new(Bytes::from(buffer)))
-}
-
 /// Creates a prometheus address on localhost:9001
 pub fn default_prometheus_address() -> String {
     format!("{LOCALHOST}:9001")
@@ -81,14 +55,6 @@ pub fn default_prometheus_address() -> String {
 /// Default pyroscope server address
 pub fn default_pyroscope_address() -> String {
     format!("{LOCALHOST}:4040")
-}
-
-fn create_metrics_server(
-    addr: &str,
-) -> Result<TcpListener, Box<dyn std::error::Error + Send + Sync>> {
-    let listener = TcpListener::bind(addr).expect("Cannot create prometheus server");
-    println!("Prometheus endpoint on http://{}", addr);
-    return Ok(listener);
 }
 
 pub struct Metrics {
@@ -141,17 +107,11 @@ impl Metrics {
 }
 
 pub struct MetricsServer {
-    join: thread::JoinHandle<()>,
-    prometheus_stopper: Arc<AtomicBool>,
+    _exporter: Exporter,
 }
 
 impl MetricsServer {
     pub fn stop(self) {
-        self.prometheus_stopper
-            .store(true, atomic::Ordering::Relaxed);
-        self.join
-            .join()
-            .expect("Cannot stop Prometheus metrics thread");
         println!("Shut down Prometheus server");
     }
 }
@@ -182,42 +142,11 @@ pub fn create_profiler_agent(pyroscope_server_addr: &str) -> Profiler {
 /// Args
 /// - prometheus_addr: Address where the prometheus server will be running locally. This is the server
 /// that returns metrics in pull mode.
-///
-/// - pyroscope_server_addr: Address of the remote Pyroscope server. The data is sent in push mode
-/// to the server and usually adds 2% overhead.
 pub fn spawn_metrics_server(prometheus_addr: &str) -> MetricsServer {
-    let stopper_arc = Arc::new(AtomicBool::default());
-    let stopper_clone = stopper_arc.clone();
-    let prometheus_str = prometheus_addr.to_string();
-    let handle = thread::spawn(move || {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let _ = runtime.block_on(runtime.spawn(async move {
-            let listener = create_metrics_server(&prometheus_str)
-                .expect("Cannot create prometheus metrics server");
-            listener
-                .set_nonblocking(true)
-                .expect("Cannot set non blocking on prometheus server");
-            let tokio_listener = tokio::net::TcpListener::from_std(listener)
-                .expect("Cannot create tokio listener for prometheus metrics");
-            while stopper_clone.load(atomic::Ordering::Relaxed) == false {
-                if let Ok(streams) = tokio_listener.accept().await {
-                    tokio::task::spawn(async move {
-                        if let Err(err) = http1::Builder::new()
-                            .serve_connection(streams.0, service_fn(metric_service))
-                            .await
-                        {
-                            println!("Error serving connection: {:?}", err);
-                        }
-                    });
-                } else {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                }
-            }
-        }));
-    });
+    let binding = prometheus_addr.parse().unwrap();
+    let exporter = prometheus_exporter::start(binding).unwrap();
 
     MetricsServer {
-        join: handle,
-        prometheus_stopper: stopper_arc.clone(),
+        _exporter: exporter,
     }
 }
