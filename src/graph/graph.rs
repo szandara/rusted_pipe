@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Condvar, Mutex},
-    thread::{self, available_parallelism, JoinHandle},
+    thread::{self, JoinHandle},
     time::Duration,
 };
 

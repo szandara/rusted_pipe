@@ -4,6 +4,7 @@
 //! user configured syncrhonizer.
 use std::{
     sync::{Arc, Mutex},
+    thread,
     time::Duration,
 };
 
@@ -147,6 +148,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                             done_notification.send(channel_id).unwrap();
                         }
                         eprintln!("Channel is disonnected, closing");
+                        thread::sleep(Duration::from_millis(100));
                         return false;
                     }
                     _ => {

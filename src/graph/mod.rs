@@ -276,7 +276,7 @@ mod tests {
             max_packets,
         );
 
-        let (mut graph, output_check) = setup_default_test(node0, node1, 10, WorkQueue::default());
+        let (graph, output_check) = setup_default_test(node0, node1, 10, WorkQueue::default());
 
         // 1200ms = 12 ms * 100 packets. Receiver consume time is just approximated since the thread:sleep is not accurate and
         // there is some computation happening inside.
@@ -339,7 +339,7 @@ mod tests {
             max_packets,
         );
 
-        let (mut graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
+        let (graph, output_check) = setup_default_test(node0, node1, 0, WorkQueue::default());
 
         let mut results = Vec::with_capacity(max_packets);
         let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
@@ -373,12 +373,12 @@ mod tests {
             max_packets,
         );
 
-        let (mut graph, output_check) = setup_default_test(node0, node1, 100, WorkQueue::new(1));
+        let (graph, output_check) = setup_default_test(node0, node1, 100, WorkQueue::new(1));
 
         let mut results = Vec::with_capacity(max_packets);
         let deadline = Instant::now() + Duration::from_millis(collection_time_ms);
 
-        let expected_versions: Vec<u128> = vec![8, 20, 30];
+        let expected_versions: Vec<u128> = vec![8, 25, 50];
         for _i in 0..expected_versions.len() {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
@@ -415,7 +415,7 @@ mod tests {
         let collection_time_ms: u64 = 50;
 
         // Very slow producer
-        let node0 = TestNodeProducer::new("producer1".to_string(), 100, max_packets);
+        let node0 = TestNodeProducer::new("producer1".to_string(), 60, max_packets);
         let node1 = TestNodeProducer::new("producer2".to_string(), 5, max_packets);
 
         let mut node0 = create_source_node(node0);

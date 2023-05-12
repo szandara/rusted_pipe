@@ -13,15 +13,27 @@ use crate::{
 };
 use atomic::{Atomic, Ordering};
 use crossbeam::channel::Sender;
+use lazy_static::lazy_static;
 use log::debug;
-use prometheus::register_histogram;
-use prometheus::Histogram;
+use prometheus::{histogram_opts, register_histogram_vec};
+use prometheus::{Histogram, HistogramVec};
 use rusty_pool::ThreadPool;
 use std::{
     sync::{Arc, Condvar, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+lazy_static! {
+    static ref METRICS_TIMER: HistogramVec = register_histogram_vec!(
+        histogram_opts!(
+            "processing_time",
+            format!("Timing for a single processor run."),
+        ),
+        &["node_id"]
+    )
+    .expect("Cannot create processing_time metrics");
+}
 
 pub(super) fn read_channel_data<T: InputGenerator + ChannelBuffer + Send>(
     id: String,
@@ -69,9 +81,7 @@ where
         thread_pool: ThreadPool,
         profiler: ProfilerTag,
     ) -> Self {
-        let metrics_timer = register_histogram!(id.clone(), format!("Timing for node: {}", &id))
-            .expect(&format!("Cannot create timer {}", id.clone()));
-
+        let metrics_timer = METRICS_TIMER.with_label_values(&[&id]);
         Self {
             id,
             running,
@@ -106,7 +116,14 @@ where
                         continue;
                     }
                 }
-
+                println!(
+                    "Work {} {}",
+                    self.id,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_nanos()
+                );
                 self.worker
                     .status
                     .store(WorkerStatus::Running, Ordering::Relaxed);
@@ -119,6 +136,14 @@ where
 
                 let future = move || {
                     let timer = metrics_clone.start_timer();
+                    println!(
+                        "Thread {}, {}",
+                        &id_thread,
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_nanos()
+                    );
                     let result = match &mut *processor_clone.lock().unwrap() {
                         Processors::Processor(proc) => {
                             proc.handle(packet.unwrap(), arc_write_channel.unwrap().lock().unwrap())
@@ -151,9 +176,9 @@ where
                         .status
                         .store(WorkerStatus::Idle, Ordering::Relaxed);
                 }
+            } else {
+                thread::sleep(Duration::from_millis(100));
             }
-            // Looping until the application is not shut down.
-            thread::sleep(Duration::from_millis(50));
         }
         self.profiler
             .remove("consumer".to_string(), self.id.clone());
