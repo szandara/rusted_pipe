@@ -217,7 +217,7 @@ impl Graph {
                         None => ProfilerTag::no_profiler(),
                     };
 
-                    let consumer = ConsumerThread::new(
+                    let mut consumer = ConsumerThread::new(
                         id_move,
                         consume_running_thread,
                         wait_clone,

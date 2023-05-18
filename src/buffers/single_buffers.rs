@@ -125,6 +125,7 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
         if self.block_full && self.buffer.is_full() {
             return Err(BufferError::BufferFull);
         }
+        self.monitor.inc();
         self.buffer.push(packet);
         Ok(())
     }
@@ -137,7 +138,11 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
     }
 
     fn pop(&mut self) -> Option<Packet<T>> {
-        self.buffer.dequeue()
+        let packet = self.buffer.dequeue();
+        if packet.is_some() {
+            self.monitor.dec();
+        }
+        packet
     }
 
     fn iter(&self) -> Box<BufferIterator> {
@@ -212,6 +217,7 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
             self.data.pop_first();
         }
         self.data.insert(packet.version, packet);
+        self.monitor.inc();
         Ok(())
     }
 
@@ -224,6 +230,7 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
 
     fn pop(&mut self) -> Option<Packet<T>> {
         if let Some(value) = self.data.pop_first() {
+            self.monitor.dec();
             return Some(value.1);
         }
         None

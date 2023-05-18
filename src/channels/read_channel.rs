@@ -12,12 +12,12 @@ use crossbeam::channel::Sender;
 use log::debug;
 
 use crate::{
-    buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
-    packet::work_queue::WorkQueue, graph::metrics::{BufferMonitor, BufferMonitorBuilder}
+    buffers::{single_buffers::{RtRingBuffer, LenTrait}, synchronizers::PacketSynchronizer},
+    packet::work_queue::WorkQueue, graph::metrics::{BufferMonitorBuilder, BufferMonitor}
 };
 
 use std::collections::HashMap;
-use crate::buffers::single_buffers::LenTrait;
+
 use crate::{
     buffers::{single_buffers::FixedSizeBuffer, BufferIterator},
     packet::typed::PacketSetTrait,
@@ -120,6 +120,8 @@ pub struct ReadChannel<T: InputGenerator + ChannelBuffer + Send> {
     pub work_queue: Option<WorkQueue<T::INPUT>>,
     /// A reference to the channels of the ReadChannel.
     pub channels: Arc<Mutex<T>>,
+    /// A monitor for upcoming work.
+    pub work_monitor: BufferMonitor,
 }
 
 unsafe impl<T: InputGenerator + ChannelBuffer + Send> Sync for ReadChannel<T> {}
@@ -188,6 +190,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
             synch_strategy,
             work_queue,
             channels: Arc::new(Mutex::new(channels)),
+            work_monitor: BufferMonitor::default()
         }
     }
 
@@ -203,20 +206,22 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         if monitor {
             monitor_builder = BufferMonitorBuilder::new(id);
         }
-        
-        let work_queue ; 
+        let work_monitor;
         if monitor {
-            work_queue = Some(WorkQueue::<T::INPUT>::new_with_metrics(process_buffer_size, monitor_builder.make_channel("_work_queue")));
+            work_monitor = monitor_builder.make_channel("_work_queue");
         } else {
-            work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size));
-        } 
+            work_monitor = BufferMonitor::default();
+        }
 
+        let work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size));
+    
         let channels = T::create_channels(channel_buffer_size, block_channel_full, monitor_builder);
-        
+
         Self {
             synch_strategy,
             work_queue,
             channels: Arc::new(Mutex::new(channels)),
+            work_monitor
         }
     }
 
@@ -231,6 +236,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
                     .get_packets_for_version(&sync, false);
                 if let Some(value) = value {
                     queue.push(value);
+                    self.work_monitor.inc();
                 }
             }
         }
