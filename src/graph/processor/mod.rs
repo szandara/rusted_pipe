@@ -103,6 +103,7 @@ impl<
     /// channel of the ReadChannel will have the same size.
     /// `process_buffer_size` - The size of the work queue. It will drop stuff to process when full.
     /// `synchronizer_type` -  A synchronizer that matches data in the ReadChannel.
+    /// `queue_monitor` -  True if queues should be monitored and available in Grafana.
     pub fn create_common(
         id: String,
         processor: Box<dyn Processor<INPUT = INPUT, OUTPUT = OUTPUT>>,
@@ -110,16 +111,19 @@ impl<
         channel_buffer_size: usize,
         process_buffer_size: usize,
         synchronizer_type: Box<dyn PacketSynchronizer>,
+        queue_monitor: bool,
     ) -> Self {
         let write_channel = TypedWriteChannel {
             writer: Box::new(OUTPUT::create()),
         };
 
         let read_channel = ReadChannel::<INPUT>::create(
+            &id,
             block_channel_full,
             channel_buffer_size,
             process_buffer_size,
             synchronizer_type,
+            queue_monitor,
         );
         let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
 
@@ -237,6 +241,7 @@ impl<INPUT: InputGenerator + ChannelBuffer + Send + 'static> TerminalNode<INPUT>
     /// channel of the ReadChannel will have the same size.
     /// `process_buffer_size` - The size of the work queue. It will drop stuff to process when full.
     /// `synchronizer_type` -  A synchronizer that matches data in the ReadChannel.
+    /// `queue_monitor` -  True if queues should be monitored and available in Grafana.
     pub fn create_common(
         id: String,
         processor: Box<dyn TerminalProcessor<INPUT = INPUT>>,
@@ -244,12 +249,15 @@ impl<INPUT: InputGenerator + ChannelBuffer + Send + 'static> TerminalNode<INPUT>
         channel_buffer_size: usize,
         process_buffer_size: usize,
         synchronizer_type: Box<dyn PacketSynchronizer>,
+        queue_monitor: bool,
     ) -> Self {
         let read_channel = ReadChannel::<INPUT>::create(
+            &id,
             block_channel_full,
             channel_buffer_size,
             process_buffer_size,
             synchronizer_type,
+            queue_monitor,
         );
         let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
 

@@ -5,10 +5,16 @@ use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
 use super::ChannelID;
+use crate::{
+
+    buffers::{single_buffers::RtRingBuffer},
+    graph::metrics::BufferMonitorBuilder
+};
+
 
 use super::ChannelError;
 use crate::buffers::single_buffers::FixedSizeBuffer;
-use crate::buffers::single_buffers::RtRingBuffer;
+use crate::buffers::single_buffers::LenTrait;
 use crate::buffers::BufferIterator;
 use crate::packet::work_queue::ReadEvent;
 use crate::DataVersion;
@@ -18,6 +24,11 @@ use paste::item;
 use std::collections::HashMap;
 use std::time::Duration;
 
+struct NamedBufferReceiver<T: FixedSizeBuffer> {
+    receiver: BufferReceiver<T>,
+    id: ChannelID,
+}
+
 macro_rules! read_channels {
     ($struct_name:ident, $($T:ident),+) => {
         item!{
@@ -25,7 +36,7 @@ macro_rules! read_channels {
             #[allow(non_camel_case_types)]
             pub struct $struct_name<$($T: Clone),+> {
                 $(
-                    $T: BufferReceiver<RtRingBuffer<$T>>,
+                    $T: NamedBufferReceiver<RtRingBuffer<$T>>,
                 )+
                 channels: Vec<ChannelID>
             }
@@ -39,8 +50,8 @@ macro_rules! read_channels {
 
             fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool {
                 $(
-                    if channel == stringify!($T) {
-                        return self.$T.buffer.get(version).is_some();
+                    if channel == &self.$T.id {
+                        return self.$T.receiver.buffer.get(version).is_some();
                     }
                 )+
                 false
@@ -48,8 +59,8 @@ macro_rules! read_channels {
 
             fn peek(&self, channel: &ChannelID) -> Option<&DataVersion> {
                 $(
-                    if channel == stringify!($T) {
-                        return self.$T.buffer.peek();
+                    if channel == &self.$T.id {
+                        return self.$T.receiver.buffer.peek();
                     }
                 )+
                 None
@@ -57,28 +68,34 @@ macro_rules! read_channels {
 
             fn are_buffers_empty(&self) -> bool {
                 [$(
-                    self.$T.buffer.len() == 0,
+                    self.$T.receiver.buffer.len() == 0,
                 )+].iter().all(|b| *b)
             }
 
-            fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>{
+            fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>{
                 let has_data = select! {
                     $(
-                        recv(self.$T.channel
+                        recv(self.$T.receiver.channel
                             .as_ref()
                             .expect(&format!("Channel not connected {} {}",
-                                stringify!($struct_name), stringify!($T))).receiver) -> msg =>
-                                    {Some(self.$T.buffer.insert(msg?))},
+                                stringify!($struct_name), self.$T.id)).receiver) -> msg =>
+                                    {
+                                        if self.$T.receiver.buffer.insert(msg?).is_ok() {
+                                            Some(&self.$T.id)
+                                        } else {
+                                            None
+                                        }
+                                    },
                     )+
                     default(timeout) => None,
                 };
-                Ok(has_data.is_some())
+                Ok(has_data)
             }
 
             fn iterator(&self, channel: &ChannelID) -> Option<Box<BufferIterator>> {
                 $(
-                    if channel == stringify!($T) {
-                        return Some(self.$T.buffer.iter());
+                    if channel == &self.$T.id {
+                        return Some(self.$T.receiver.buffer.iter());
                     }
                 )+
                 None
@@ -86,7 +103,7 @@ macro_rules! read_channels {
 
             fn min_version(&self) -> Option<&DataVersion> {
                 let vals = [$(
-                    self.$T.buffer.peek(),
+                    self.$T.receiver.buffer.peek(),
                 )+];
                 let mut min = None;
                 for val in vals {
@@ -109,7 +126,10 @@ macro_rules! read_channels {
             pub fn create($($T: RtRingBuffer<$T>),+) -> Self {
                 Self {
                     $(
-                        $T: BufferReceiver {buffer: Box::new($T), channel: None},
+                        $T: NamedBufferReceiver {
+                            receiver: BufferReceiver {buffer: Box::new($T), channel: None},
+                            id: ChannelID::from(stringify!($T))
+                        },
                     )+
                     channels: vec![$(ChannelID::from(stringify!($T)),)+]
                 }
@@ -117,7 +137,7 @@ macro_rules! read_channels {
 
             $(
                 pub fn $T(&mut self) -> &mut BufferReceiver<RtRingBuffer<$T>> {
-                    &mut self.$T
+                    &mut self.$T.receiver
                 }
             )+
         }
@@ -130,9 +150,10 @@ macro_rules! read_channels {
                 fn create_channels(
                     buffer_size: usize,
                     block_on_full: bool,
+                    monitor: BufferMonitorBuilder
                 ) -> $struct_name<$($T),+> {
                     $struct_name::create(
-                        $(RtRingBuffer::<$T>::new(buffer_size, block_on_full)),+
+                        $(RtRingBuffer::<$T>::new(buffer_size, block_on_full, monitor.make_channel(stringify!($T)))),+
                     )
                 }
 
@@ -144,9 +165,8 @@ macro_rules! read_channels {
                     let mut result = [<$struct_name PacketSet>]::<$($T),+>::create();
 
                     $(
-                        let channel = ChannelID::from(stringify!($T));
-                        let version = data_versions.get(&channel).expect("Cannot find channel {channel}");
-                        let data = get_data(&mut self.$T.buffer, version, exact_match);
+                        let version = data_versions.get(&self.$T.id).expect(&format!("Cannot find channel {}", self.$T.id));
+                        let data = get_data(&mut self.$T.receiver.buffer, version, exact_match);
                         result.[<set_ $T>](data);
                     )+
 
@@ -181,7 +201,7 @@ impl InputGenerator for NoBuffer {
         todo!()
     }
 
-    fn create_channels(_buffer_size: usize, _block_on_full: bool) -> Self {
+    fn create_channels(_buffer_size: usize, _block_on_full: bool, _monitor: BufferMonitorBuilder) -> Self {
         todo!()
     }
 }
@@ -207,7 +227,7 @@ impl ChannelBuffer for NoBuffer {
         todo!()
     }
 
-    fn try_receive(&mut self, _: Duration) -> Result<bool, ChannelError> {
+    fn try_receive(&mut self, _: Duration) -> Result<Option<&ChannelID>, ChannelError> {
         todo!()
     }
 

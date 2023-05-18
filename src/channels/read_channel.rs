@@ -13,11 +13,11 @@ use log::debug;
 
 use crate::{
     buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
-    packet::work_queue::WorkQueue,
+    packet::work_queue::WorkQueue, graph::metrics::{BufferMonitor, BufferMonitorBuilder}
 };
 
 use std::collections::HashMap;
-
+use crate::buffers::single_buffers::LenTrait;
 use crate::{
     buffers::{single_buffers::FixedSizeBuffer, BufferIterator},
     packet::typed::PacketSetTrait,
@@ -88,7 +88,7 @@ pub trait ChannelBuffer {
     ///
     /// * Arguments
     /// `timeout` - How long to wait for the data.
-    fn try_receive(&mut self, timeout: Duration) -> Result<bool, ChannelError>;
+    fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>;
 }
 
 /// A trait for generating packet set from an existing ReadChannel.
@@ -108,7 +108,7 @@ pub trait InputGenerator {
         exact_match: bool,
     ) -> Option<Self::INPUT>;
 
-    fn create_channels(buffer_size: usize, block_on_full: bool) -> Self;
+    fn create_channels(buffer_size: usize, block_on_full: bool, monitor: BufferMonitorBuilder) -> Self;
 }
 
 /// A generic ReadChannel that holds a reference to a struct that has
@@ -128,39 +128,47 @@ unsafe impl<T: InputGenerator + ChannelBuffer + Send> Send for ReadChannel<T> {}
 impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for ReadChannel<T> {
     type Data = T::INPUT;
 
-    fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> bool {
-        let data = self
-            .channels
-            .lock()
-            .unwrap()
-            .try_receive(Duration::from_millis(100));
-        match data {
-            Ok(has_data) => {
-                if has_data {
-                    self.synchronize()
-                }
-            }
-            Err(err) => {
-                eprintln!("Exception while reading {err:?}");
-                match err {
-                    crate::channels::ChannelError::ReceiveError(_) => {
-                        if self.channels.lock().unwrap().are_buffers_empty() {
-                            done_notification.send(channel_id).unwrap();
+    fn read(&mut self, node_id: String, done_notification: Sender<String>) -> Option<ChannelID> {
+        let data;
+
+        {
+            let mut locked = self
+                .channels
+                .lock()
+                .expect("Poisoned read channel mutex");
+            let result =  locked.try_receive(Duration::from_millis(100));
+            
+            data = match result {
+                Ok(has_data) => {
+                    has_data.cloned()
+                },
+                Err(err) => {
+                    eprintln!("Node {node_id}: Exception while reading {err:?}");
+                    match err {
+                        crate::channels::ChannelError::ReceiveError(_) => {
+                            if locked.are_buffers_empty() {
+                                done_notification.send(node_id).unwrap();
+                            }
+                            eprintln!("Channel is disonnected, closing");
+                            thread::sleep(Duration::from_millis(100));
+                            return None;
                         }
-                        eprintln!("Channel is disonnected, closing");
-                        thread::sleep(Duration::from_millis(100));
-                        return false;
-                    }
-                    _ => {
-                        debug!("Sending done {channel_id}");
-                        if self.channels.lock().unwrap().are_buffers_empty() {
-                            done_notification.send(channel_id).unwrap();
+                        _ => {
+                            debug!("Sending done {node_id}");
+                            if locked.are_buffers_empty() {
+                                done_notification.send(node_id).unwrap();
+                            }
+                            None
                         }
                     }
                 }
-            }
+            };
         }
-        true
+
+        if data.is_some() {
+            self.synchronize()
+        }
+        data
     }
 
     fn start(&mut self, work_queue: WorkQueue<Self::Data>) {
@@ -184,15 +192,30 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
     }
 
     pub fn create(
+        id: &str,
         block_channel_full: bool,
         channel_buffer_size: usize,
         process_buffer_size: usize,
         synch_strategy: Box<dyn PacketSynchronizer>,
+        monitor: bool
     ) -> Self {
-        let channels = T::create_channels(channel_buffer_size, block_channel_full);
+        let mut monitor_builder = BufferMonitorBuilder::no_monitor();
+        if monitor {
+            monitor_builder = BufferMonitorBuilder::new(id);
+        }
+        
+        let work_queue ; 
+        if monitor {
+            work_queue = Some(WorkQueue::<T::INPUT>::new_with_metrics(process_buffer_size, monitor_builder.make_channel("_work_queue")));
+        } else {
+            work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size));
+        } 
+
+        let channels = T::create_channels(channel_buffer_size, block_channel_full, monitor_builder);
+        
         Self {
             synch_strategy,
-            work_queue: Some(WorkQueue::<T::INPUT>::new(process_buffer_size)),
+            work_queue,
             channels: Arc::new(Mutex::new(channels)),
         }
     }
@@ -258,6 +281,7 @@ mod tests {
     use crate::channels::typed_read_channel::ReadChannel2;
     use crate::channels::untyped_channel;
     use crate::channels::untyped_read_channel::UntypedReadChannel;
+    use crate::graph::metrics::BufferMonitor;
     use crate::packet::typed::ReadChannel2PacketSet;
     use crate::packet::work_queue::WorkQueue;
     use crate::packet::Packet;
@@ -272,8 +296,8 @@ mod tests {
     ) {
         let synch_strategy = Box::new(TimestampSynchronizer::default());
         let read_channel2 = ReadChannel2::create(
-            RtRingBuffer::<String>::new(2, true),
-            RtRingBuffer::<String>::new(2, true),
+            RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
+            RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
         );
         let read_channel =
             ReadChannel::new(synch_strategy, Some(WorkQueue::default()), read_channel2);
@@ -292,7 +316,7 @@ mod tests {
     fn create_untyped_buffer(
         channel: ReceiverChannel<Box<Untyped>>,
     ) -> BufferReceiver<RtRingBuffer<Box<Untyped>>> {
-        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true);
+        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true, BufferMonitor::default());
         BufferReceiver {
             buffer: Box::new(buffer),
             channel: Some(channel),
@@ -395,8 +419,8 @@ mod tests {
     fn test_read_channel_try_read_returns_error_when_buffer_is_full() {
         let synch_strategy = Box::new(TimestampSynchronizer::default());
         let read_channel2 = ReadChannel2::create(
-            RtRingBuffer::<String>::new(2, true),
-            RtRingBuffer::<String>::new(2, true),
+            RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
+            RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
         );
         let mut read_channel = ReadChannel::new(
             synch_strategy,

@@ -1,8 +1,8 @@
-use std::time::Duration;
+use std::{time::Duration, sync::Arc};
 
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
 
-use crate::channels::ChannelError;
+use crate::{channels::ChannelError, buffers::single_buffers::LenTrait, graph::metrics::BufferMonitor};
 
 pub struct ReadEvent<T> {
     pub packet_data: T,
@@ -12,6 +12,7 @@ pub struct WorkQueue<T> {
     notifier: Sender<ReadEvent<T>>,
     queue: Receiver<ReadEvent<T>>,
     max_in_queue: usize,
+    monitor: Arc<BufferMonitor>
 }
 
 impl<T> Clone for WorkQueue<T> {
@@ -20,7 +21,14 @@ impl<T> Clone for WorkQueue<T> {
             notifier: self.notifier.clone(),
             queue: self.queue.clone(),
             max_in_queue: self.max_in_queue.clone(),
+            monitor: self.monitor.clone()
         }
+    }
+}
+
+impl<T> LenTrait for WorkQueue<T> {
+    fn len(&self) -> usize {
+        self.queue.len()
     }
 }
 
@@ -31,6 +39,7 @@ impl<T> WorkQueue<T> {
             queue,
             notifier,
             max_in_queue: std::usize::MAX,
+            monitor: Arc::new(BufferMonitor::default())
         }
     }
 
@@ -40,6 +49,17 @@ impl<T> WorkQueue<T> {
             queue,
             notifier,
             max_in_queue,
+            monitor: Arc::new(BufferMonitor::default())
+        }
+    }
+
+    pub fn new_with_metrics(max_in_queue: usize, monitor: BufferMonitor) -> Self {
+        let (notifier, queue) = bounded::<ReadEvent<T>>(max_in_queue);
+        WorkQueue {
+            queue,
+            notifier,
+            max_in_queue,
+            monitor: Arc::new(monitor)
         }
     }
 

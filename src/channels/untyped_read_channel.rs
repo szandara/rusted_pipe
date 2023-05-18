@@ -15,6 +15,8 @@ use super::read_channel::get_data;
 use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
+use crate::buffers::single_buffers::LenTrait;
+use crate::graph::metrics::BufferMonitorBuilder;
 use super::ChannelError;
 use super::ChannelID;
 use super::UntypedPacket;
@@ -119,7 +121,7 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
         self.buffered_data.values().all(|b| b.buffer.len() == 0)
     }
 
-    fn try_receive(&mut self, timeout: std::time::Duration) -> Result<bool, ChannelError> {
+    fn try_receive(&mut self, timeout: std::time::Duration) -> Result<Option<&ChannelID>, ChannelError> {
         let mut select = Select::new();
         for (id, rec) in &self.buffered_data {
             if let Some(channel) = rec.channel.as_ref() {
@@ -141,10 +143,10 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
                     .recv()?;
 
                 buffer.as_mut().unwrap().buffer.insert(msg)?;
-                return Ok(true);
+                return Ok(Some(ch));
             }
         }
-        Ok(false)
+        Ok(None)
     }
 
     fn min_version(&self) -> Option<&DataVersion> {
@@ -201,7 +203,7 @@ impl InputGenerator for UntypedReadChannel {
         Some(UntypedPacketSet::new(packet_set))
     }
 
-    fn create_channels(_buffer_size: usize, _block_on_full: bool) -> Self {
+    fn create_channels(_buffer_size: usize, _block_on_full: bool, monitor: BufferMonitorBuilder) -> Self {
         Self::default()
     }
 }
@@ -220,6 +222,7 @@ mod tests {
     use crate::channels::untyped_read_channel::UntypedReadChannel;
     use crate::channels::ReceiverChannel;
     use crate::channels::UntypedSenderChannel;
+    use crate::graph::metrics::BufferMonitor;
     use crate::packet::Packet;
     use crate::packet::Untyped;
     use crate::ChannelError;
@@ -229,7 +232,7 @@ mod tests {
     fn create_buffer(
         channel: ReceiverChannel<Box<Untyped>>,
     ) -> BufferReceiver<RtRingBuffer<Box<Untyped>>> {
-        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true);
+        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true, BufferMonitor::default());
         BufferReceiver {
             buffer: Box::new(buffer),
             channel: Some(channel),
@@ -297,7 +300,7 @@ mod tests {
             read_channel
                 .try_receive(Duration::from_millis(100))
                 .unwrap(),
-            true
+            Some(&ChannelID::from("test_channel_1"))
         );
     }
 
@@ -336,7 +339,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             read_channel.try_receive(Duration::from_millis(50)).unwrap(),
-            true
+            Some(&ChannelID::from("test0"))
         );
         packet.version.timestamp_ns = 2;
         senders
@@ -346,7 +349,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             read_channel.try_receive(Duration::from_millis(50)).unwrap(),
-            true
+            Some(&ChannelID::from("test0"))
         );
 
         packet.version.timestamp_ns = 3;

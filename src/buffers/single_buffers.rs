@@ -1,11 +1,20 @@
-use crate::{channels::Packet, DataVersion};
+use crate::{channels::Packet, DataVersion, graph::metrics::BufferMonitor};
 use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, RingBufferWrite};
+
+use std::{collections::BTreeMap};
+use super::{BufferError, BufferIterator};
+
 
 type _RingBuffer<T> = AllocRingBuffer<Packet<T>>;
 
+pub trait LenTrait {
+    /// Current length of the buffer.
+    fn len(&self) -> usize;
+}
+
 /// Trait describing an input buffer which composes one of the channels of
 /// a ReadChannel.
-pub trait FixedSizeBuffer {
+pub trait FixedSizeBuffer: LenTrait {
     /// The data type handled.
     type Data;
 
@@ -36,10 +45,8 @@ pub trait FixedSizeBuffer {
     /// `packet` - Data enclosed in a packet.
     ///
     /// * Returns
-    /// Ok if the data could be inserted or error in oppostie case.
+    /// Ok if the data could be inserted or error in opposite case.
     fn insert(&mut self, packet: Packet<Self::Data>) -> Result<(), BufferError>;
-    /// Current length of the buffer.
-    fn len(&self) -> usize;
     /// Peek the head of the buffer, oldest entry in the buffer.
     fn peek(&self) -> Option<&DataVersion>;
     /// Gets an iterator to the data.
@@ -52,7 +59,7 @@ pub trait FixedSizeBuffer {
     /// `timestamp_ns` - Timestamp to test.
     ///
     /// * Returns
-    /// Ok if the data could be inserted or error in oppostie case.
+    /// Ok if the data could be inserted or error in the opposite case.
     fn check_order(&self, timestamp_ns: u128) -> Result<(), BufferError> {
         if let Some(p) = self.peek() {
             if timestamp_ns <= p.timestamp_ns {
@@ -68,6 +75,7 @@ pub trait FixedSizeBuffer {
 pub struct RtRingBuffer<T> {
     buffer: _RingBuffer<T>,
     block_full: bool,
+    monitor: BufferMonitor
 }
 
 impl<T> RtRingBuffer<T> {
@@ -78,18 +86,26 @@ impl<T> RtRingBuffer<T> {
     /// `max_size` -  The max allowed size in the buffer.
     /// `block_full` -  Block if full, it would return an error when inserting, if false,
     /// it will drop oldest data.
-    pub fn new(mut max_size: usize, block_full: bool) -> Self {
+    /// `monitor` - True if the buffer should collect metrics.
+    pub fn new(mut max_size: usize, block_full: bool, monitor: BufferMonitor) -> Self {
         if !max_size.is_power_of_two() {
             max_size = 2_usize.pow(max_size.ilog2() / 2_usize.ilog2() + 1);
         }
         RtRingBuffer {
             buffer: _RingBuffer::with_capacity(max_size),
             block_full,
+            monitor
         }
     }
 
     pub fn find_version(&self, version: &DataVersion) -> Option<&Packet<T>> {
         self.buffer.iter().find(|packet| packet.version == *version)
+    }
+}
+
+impl<T> LenTrait for RtRingBuffer<T> {
+    fn len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
@@ -113,10 +129,6 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
         Ok(())
     }
 
-    fn len(&self) -> usize {
-        self.buffer.len()
-    }
-
     fn peek(&self) -> Option<&DataVersion> {
         if let Some(peek) = self.buffer.peek() {
             return Some(&peek.version);
@@ -133,9 +145,6 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
     }
 }
 
-use std::collections::BTreeMap;
-
-use super::{BufferError, BufferIterator};
 
 /// An implementation of 'FixedSizeBuffer' using a BTree. The buffer
 /// is indexed by data version and it's ordered.
@@ -143,6 +152,7 @@ pub struct FixedSizeBTree<T> {
     data: BTreeMap<DataVersion, Packet<T>>,
     max_size: usize,
     block_full: bool,
+    monitor: BufferMonitor
 }
 
 impl<T> FixedSizeBTree<T> {
@@ -153,6 +163,7 @@ impl<T> FixedSizeBTree<T> {
             data: Default::default(),
             max_size: 1000,
             block_full: false,
+            monitor: BufferMonitor::default()
         }
     }
     /// Creates a new instance.
@@ -162,13 +173,23 @@ impl<T> FixedSizeBTree<T> {
     /// `max_size` -  The max allowed size in the buffer.
     /// `block_full` -  Block if full, it would return an error when inserting, if false,
     /// it will drop oldest data.
-    pub fn new(max_size: usize, block_full: bool) -> Self {
+    pub fn new(max_size: usize, block_full: bool, monitor: BufferMonitor) -> Self {
         FixedSizeBTree {
             data: Default::default(),
             max_size,
             block_full,
+            monitor
         }
     }
+}
+
+
+impl<T> LenTrait for FixedSizeBTree<T> {
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
 }
 
 impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
@@ -192,10 +213,6 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
         }
         self.data.insert(packet.version, packet);
         Ok(())
-    }
-
-    fn len(&self) -> usize {
-        self.data.len()
     }
 
     fn peek(&self) -> Option<&DataVersion> {
@@ -229,31 +246,31 @@ mod fixed_size_buffer_tests {
                 #[test]
                 #[allow(non_snake_case)]
                 fn [< test_buffer_inserts_and_drops_data_if_past_capacity _ $type >] () {
-                    let buffer = $type::new(32, false);
+                    let buffer = $type::new(32, false, BufferMonitor::default());
                     test_buffer_inserts_and_drops_data_if_past_capacity::<$type<String>>(buffer);
                 }
                 #[test]
                 #[allow(non_snake_case)]
                 fn [< test_buffer_contains_key_returns_expected _ $type >] () {
-                    let buffer = $type::new(2, false);
+                    let buffer = $type::new(2, false, BufferMonitor::default());
                     test_buffer_contains_key_returns_expected::<$type<String>>(buffer);
                 }
                 #[test]
                 #[allow(non_snake_case)]
                 fn [< test_buffer_get_returns_expected_data _ $type >] () {
-                    let buffer = $type::new(2, false);
+                    let buffer = $type::new(2, false, BufferMonitor::default());
                     test_buffer_get_returns_expected_data::<$type<String>>(buffer);
                 }
                 #[test]
                 #[allow(non_snake_case)]
                 fn [< test_buffer_insert_returns_errr_if_full_and_block _ $type >] () {
-                    let buffer = $type::new(2, true);
+                    let buffer = $type::new(2, true, BufferMonitor::default());
                     test_buffer_insert_returns_errr_if_full_and_block::<$type<String>>(buffer);
                 }
                 #[test]
                 #[allow(non_snake_case)]
                 fn [< test_buffer_returns_error_if_data_out_of_order _ $type >] () {
-                    let buffer = $type::new(3, true);
+                    let buffer = $type::new(3, true, BufferMonitor::default());
                     test_buffer_returns_error_if_data_out_of_order::<$type<String>>(buffer);
                 }
             }

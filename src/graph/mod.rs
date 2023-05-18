@@ -7,6 +7,7 @@ pub mod runtime;
 mod tests {
     use super::graph::link;
     use super::graph::Graph;
+    use super::metrics::BufferMonitor;
     use super::metrics::Metrics;
     use super::processor::SourceNode;
     use super::processor::SourceProcessor;
@@ -131,7 +132,9 @@ mod tests {
                     .as_millis()
             );
             self.counter += 1;
-            self.output.send(input).unwrap();
+            if let Err(err) = self.output.send(input) {
+                eprintln!("Error sending on channel {}: {:?}", self.id, err);
+            }
             thread::sleep(Duration::from_millis(self.consume_time_ms));
             Ok(())
         }
@@ -162,8 +165,8 @@ mod tests {
     ) -> TerminalNode<ReadChannel2<String, String>> {
         let synch_strategy = Box::new(TimestampSynchronizer::default());
         let read_channel2 = ReadChannel2::create(
-            RtRingBuffer::<String>::new(buffer_size, block_full),
-            RtRingBuffer::<String>::new(buffer_size, block_full),
+            RtRingBuffer::<String>::new(buffer_size, block_full, BufferMonitor::default()),
+            RtRingBuffer::<String>::new(buffer_size, block_full, BufferMonitor::default()),
         );
         let read_channel = ReadChannel::new(
             synch_strategy,
@@ -353,6 +356,7 @@ mod tests {
         }
 
         check_results(&results, max_packets);
+        println!("Stopping graph");
         graph.stop(false, None);
     }
 

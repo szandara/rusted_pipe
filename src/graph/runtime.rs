@@ -1,9 +1,9 @@
 use super::{
     graph::{ProcessorWorker, WorkerStatus},
-    metrics::ProfilerTag,
+    metrics::{ProfilerTag},
     processor::Processors,
 };
-use crate::channels::read_channel::ReadChannel;
+use crate::channels::{read_channel::ReadChannel};
 use crate::channels::ReadChannelTrait;
 use crate::channels::WriteChannelTrait;
 use crate::graph::graph::GraphStatus;
@@ -21,7 +21,7 @@ use rusty_pool::ThreadPool;
 use std::{
     sync::{Arc, Condvar, Mutex},
     thread,
-    time::Duration,
+    time::Duration
 };
 
 lazy_static! {
@@ -170,5 +170,6 @@ where
         }
         self.profiler
             .remove("consumer".to_string(), self.id.clone());
+        println!("Worker {} exited", self.id);
     }
 }

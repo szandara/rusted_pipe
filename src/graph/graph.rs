@@ -105,6 +105,7 @@ impl Graph {
                             reading_running_thread,
                             read_channel,
                             done_channel,
+                            
                         )
                     }),
                 );
@@ -245,7 +246,7 @@ impl Graph {
             // Wait for all buffers to be empty
             self.running
                 .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
-
+            println!("Waiting for data to be consumed");
             while !self
                 .node_threads
                 .iter()
@@ -286,16 +287,19 @@ impl Graph {
         self.running
             .swap(GraphStatus::Terminating, Ordering::Relaxed);
 
+        
         let keys = self.node_threads.keys().cloned().collect_vec();
         for id in keys {
+            println!("Waiting for node {id} to stop");
             self.node_threads.remove(&id).unwrap().join().unwrap();
         }
 
         let keys = self.read_threads.keys().cloned().collect_vec();
         for id in keys {
+            println!("Waiting for reader {id} to stop");
             self.read_threads.remove(&id).unwrap().join().unwrap();
         }
-        println!("Waiting for metrics to stop",);
+        println!("Waiting for metrics to stop");
         self.metrics.stop();
     }
 }

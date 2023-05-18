@@ -72,14 +72,14 @@ pub mod tests {
             synchronizers::exact_synchronize,
         },
         channels::{typed_read_channel::ReadChannel3, ChannelID, Packet},
-        DataVersion,
+        DataVersion, graph::metrics::BufferMonitor,
     };
 
     pub fn create_test_buffer() -> ReadChannel3<String, String, String> {
         ReadChannel3::create(
-            RtRingBuffer::<String>::new(100, false),
-            RtRingBuffer::<String>::new(100, false),
-            RtRingBuffer::<String>::new(100, false),
+            RtRingBuffer::<String>::new(100, false, BufferMonitor::default()),
+            RtRingBuffer::<String>::new(100, false, BufferMonitor::default()),
+            RtRingBuffer::<String>::new(100, false, BufferMonitor::default()),
         )
     }
 
