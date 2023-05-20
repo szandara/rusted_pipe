@@ -44,15 +44,18 @@ pub struct UntypedReadChannel {
     connected_channels: Vec<ChannelID>,
 }
 
-impl UntypedReadChannel {
+impl Default for UntypedReadChannel {
     /// A default UntypedReadChannel with no channels.
-    pub fn default() -> Self {
+    fn default() -> Self {
         UntypedReadChannel {
             buffered_data: Default::default(),
             connected_channels: vec![],
         }
     }
+}
 
+impl UntypedReadChannel {
+    
     /// A pre-initialized UntypedReadChannel.
     pub fn new(
         buffered_data: IndexMap<ChannelID, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
@@ -91,7 +94,7 @@ impl UntypedReadChannel {
     }
 }
 
-impl<'a> ChannelBuffer for UntypedReadChannel {
+impl ChannelBuffer for UntypedReadChannel {
     fn available_channels(&self) -> Vec<&ChannelID> {
         self.buffered_data.keys().collect_vec()
     }

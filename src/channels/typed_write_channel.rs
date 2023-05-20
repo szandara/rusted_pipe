@@ -12,10 +12,14 @@ pub struct BufferWriter<U> {
     pub channels: Vec<SenderChannel<U>>,
 }
 
-impl<U: Clone + 'static> BufferWriter<U> {
-    pub fn default() -> Self {
+impl<U: Clone + 'static> Default for BufferWriter<U> {
+    fn default() -> Self {
         Self { channels: vec![] }
     }
+}
+
+impl<U: Clone + 'static> BufferWriter<U> {
+    
     pub fn link(&mut self, sender: SenderChannel<U>) {
         self.channels.push(sender);
     }

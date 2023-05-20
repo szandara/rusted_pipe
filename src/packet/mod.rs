@@ -21,7 +21,7 @@ pub enum PacketError {
     MissingChannelData(usize),
 }
 
-#[derive(Debug, Copy, Clone, Hash, Eq, Ord, PartialOrd)]
+#[derive(Debug, Copy, Clone, Eq, Ord, PartialOrd)]
 pub struct DataVersion {
     pub timestamp_ns: u128,
 }
@@ -68,7 +68,7 @@ impl<T: 'static> Packet<T> {
     }
 }
 
-#[derive(Eq, Hash, Debug, Clone, PartialOrd, Ord)]
+#[derive(Eq, Hash, Debug, Clone, PartialEq, PartialOrd, Ord)]
 pub struct ChannelID {
     pub id: String,
 }
@@ -106,11 +106,5 @@ impl From<&str> for ChannelID {
 impl From<String> for ChannelID {
     fn from(id: String) -> Self {
         ChannelID { id }
-    }
-}
-
-impl PartialEq for ChannelID {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
     }
 }

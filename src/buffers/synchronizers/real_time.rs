@@ -144,7 +144,7 @@ fn extract_matches(
 /// * Returns
 ///
 /// A tuple containing the result of the matching if it exists and a boolean telling if an out of sync was detected.
-fn find_common_min<'a>(
+fn find_common_min(
     mut iterators: Vec<Box<BufferIterator>>,
     tolerance: u128,
     min_timestamp: u128,
