@@ -3,7 +3,7 @@
 //! allocate space for the incoming data and synchronize that data using the
 //! user configured syncrhonizer.
 use std::{
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock, PoisonError},
     thread,
     time::Duration,
 };
@@ -12,7 +12,7 @@ use crossbeam::channel::Sender;
 use log::debug;
 
 use crate::{
-    buffers::{single_buffers::{RtRingBuffer, LenTrait}, synchronizers::PacketSynchronizer},
+    buffers::{single_buffers::{RtRingBuffer}, synchronizers::PacketSynchronizer},
     packet::work_queue::WorkQueue, graph::metrics::{BufferMonitorBuilder, BufferMonitor}
 };
 
@@ -119,7 +119,7 @@ pub struct ReadChannel<T: InputGenerator + ChannelBuffer + Send> {
     /// A work queue that holds the already matched tuples.
     pub work_queue: Option<WorkQueue<T::INPUT>>,
     /// A reference to the channels of the ReadChannel.
-    pub channels: Arc<Mutex<T>>,
+    pub channels: Arc<RwLock<T>>,
     /// A monitor for upcoming work.
     pub work_monitor: BufferMonitor,
 }
@@ -136,8 +136,8 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
         {
             let mut locked = self
                 .channels
-                .lock()
-                .expect("Poisoned read channel mutex");
+                .write()
+                .unwrap_or_else(PoisonError::into_inner);
             let result =  locked.try_receive(Duration::from_millis(100));
             
             data = match result {
@@ -149,7 +149,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                     match err {
                         crate::channels::ChannelError::ReceiveError(_) => {
                             if locked.are_buffers_empty() {
-                                done_notification.send(node_id).unwrap();
+                                let _ = done_notification.send(node_id);
                             }
                             eprintln!("Channel is disonnected, closing");
                             thread::sleep(Duration::from_millis(100));
@@ -158,7 +158,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                         _ => {
                             debug!("Sending done {node_id}");
                             if locked.are_buffers_empty() {
-                                done_notification.send(node_id).unwrap();
+                                let _ = done_notification.send(node_id);
                             }
                             None
                         }
@@ -189,7 +189,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         ReadChannel {
             synch_strategy,
             work_queue,
-            channels: Arc::new(Mutex::new(channels)),
+            channels: Arc::new(RwLock::new(channels)),
             work_monitor: BufferMonitor::default()
         }
     }
@@ -220,7 +220,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         Self {
             synch_strategy,
             work_queue,
-            channels: Arc::new(Mutex::new(channels)),
+            channels: Arc::new(RwLock::new(channels)),
             work_monitor
         }
     }
@@ -229,12 +229,9 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         if let Some(queue) = self.work_queue.as_ref() {
             let synch = self.synch_strategy.synchronize(self.channels.clone());
             if let Some(sync) = synch {
-                let value = self
-                    .channels
-                    .lock()
-                    .unwrap()
-                    .get_packets_for_version(&sync, false);
-                if let Some(value) = value {
+                let mut channels = if let Ok(channels) = self.channels.write() {channels} else {return;};
+                    
+                if let Some(value) = channels.get_packets_for_version(&sync, false) {
                     queue.push(value);
                     self.work_monitor.inc();
                 }
@@ -311,7 +308,7 @@ mod tests {
         let (channel_sender, channel_receiver) = typed_channel::<String>();
         read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .link(channel_receiver);
@@ -339,7 +336,7 @@ mod tests {
         let (channel_sender, channel_receiver) = untyped_channel();
         read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .add_channel(
                 ChannelID::from("test0"),
@@ -363,7 +360,7 @@ mod tests {
         assert_eq!(
             read_channel
                 .channels
-                .lock()
+                .write()
                 .unwrap()
                 .c1()
                 .try_read()
@@ -383,7 +380,7 @@ mod tests {
         assert_eq!(
             read_channel
                 .channels
-                .lock()
+                .write()
                 .unwrap()
                 .get_channel_mut(&ChannelID::from("test0"))
                 .unwrap()
@@ -394,7 +391,7 @@ mod tests {
 
         assert!(read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .get_channel_mut(&ChannelID::from("test0"))
             .unwrap()
@@ -407,14 +404,14 @@ mod tests {
         let (read_channel, _) = create_typed_read_channel();
         assert!(read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .try_read()
             .is_err());
         assert!(read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c2()
             .try_read()
@@ -437,7 +434,7 @@ mod tests {
         let (s1, channel_receiver) = typed_channel::<String>();
         read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .link(channel_receiver);
@@ -445,7 +442,7 @@ mod tests {
         let (_, channel_receiver) = typed_channel::<String>();
         read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c2()
             .link(channel_receiver);
@@ -463,21 +460,21 @@ mod tests {
         //assert!(read_channel.read("c1".to_string(), done.0));
         assert!(read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .try_read()
             .is_ok());
         assert!(read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .try_read()
             .is_ok());
         assert!(read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .try_read()
@@ -491,7 +488,7 @@ mod tests {
         let (read_channel, _) = create_typed_read_channel();
         read_channel
             .channels
-            .lock()
+            .write()
             .unwrap()
             .c1()
             .link(channel_receiver);

@@ -14,7 +14,7 @@ use crate::channels::ChannelID;
 use crate::DataVersion;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 /// Trait that defines how a synchronizer must behave.
 pub trait PacketSynchronizer: Send {
@@ -27,17 +27,17 @@ pub trait PacketSynchronizer: Send {
     /// and an optional data entry for that channel is returned.
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+        ordered_buffer: Arc<RwLock<dyn ChannelBuffer>>,
     ) -> Option<HashMap<ChannelID, Option<DataVersion>>>;
 }
 
 /// Synchronize a read channel if the minimum entry has an exact match in each channel.
 fn exact_synchronize(
-    ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+    ordered_buffer: Arc<RwLock<dyn ChannelBuffer>>,
 ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
 
-    let version = min_version.values().next().unwrap();
+    let version = if let Some(version) = min_version.values().next() {version} else {return None;};
     if min_version.values().all(|v| v.is_some()) && min_version.values().all(|v| v == version) {
         return Some(min_version);
     }
@@ -46,10 +46,10 @@ fn exact_synchronize(
 
 /// Gets the minimum version of each buffer in the channel.
 fn get_min_versions<'a>(
-    buffer: Arc<Mutex<dyn ChannelBuffer + 'a>>,
+    buffer: Arc<RwLock<dyn ChannelBuffer + 'a>>,
 ) -> HashMap<ChannelID, Option<DataVersion>> {
-    let buffer = buffer.lock().unwrap();
     let mut out_map = HashMap::<ChannelID, Option<DataVersion>>::default();
+    let buffer = if let Ok(data) = buffer.read() {data} else {return out_map;};
 
     for channel in buffer.available_channels().iter() {
         out_map.insert(ChannelID::from(channel), buffer.peek(channel).cloned());
@@ -61,7 +61,7 @@ fn get_min_versions<'a>(
 pub mod tests {
     use std::{
         collections::HashMap,
-        sync::{Arc, Mutex},
+        sync::{Arc, RwLock},
     };
 
     use itertools::Itertools;
@@ -105,7 +105,7 @@ pub mod tests {
     }
 
     pub fn add_data(
-        buffer: Arc<Mutex<ReadChannel3<String, String, String>>>,
+        buffer: Arc<RwLock<ReadChannel3<String, String, String>>>,
         channel_id: String,
         version_timestamp: u128,
     ) {
@@ -117,7 +117,7 @@ pub mod tests {
         };
         if channel_id == "c1" {
             buffer
-                .lock()
+                .write()
                 .unwrap()
                 .c1()
                 .buffer
@@ -125,7 +125,7 @@ pub mod tests {
                 .unwrap();
         } else if channel_id == "c2" {
             buffer
-                .lock()
+                .write()
                 .unwrap()
                 .c2()
                 .buffer
@@ -133,7 +133,7 @@ pub mod tests {
                 .unwrap();
         } else if channel_id == "c3" {
             buffer
-                .lock()
+                .write()
                 .unwrap()
                 .c3()
                 .buffer
@@ -146,7 +146,7 @@ pub mod tests {
     fn test_timestamp_synchronize_is_none_if_no_data_on_channel() {
         let buffer = create_test_buffer();
 
-        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let safe_buffer = Arc::new(RwLock::new(buffer));
 
         add_data(safe_buffer.clone(), "c1".to_string(), 2);
         add_data(safe_buffer.clone(), "c1".to_string(), 3);

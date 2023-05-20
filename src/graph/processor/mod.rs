@@ -79,7 +79,7 @@ impl<
         let write_channel = TypedWriteChannel {
             writer: Box::new(writer_channel),
         };
-        let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
+        let work_queue = read_channel.work_queue.as_ref().expect("Cannot create read channel without work queue").clone();
         Node {
             handler: processor,
             read_channel,
@@ -125,7 +125,7 @@ impl<
             synchronizer_type,
             queue_monitor,
         );
-        let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
+        let work_queue = read_channel.work_queue.as_ref().expect("Channel has no work queue.").clone();
 
         Self {
             id,
@@ -219,7 +219,7 @@ impl<INPUT: InputGenerator + ChannelBuffer + Send + 'static> TerminalNode<INPUT>
         read_channel: ReadChannel<INPUT>,
     ) -> TerminalNode<INPUT> {
         let id = id.clone();
-        let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
+        let work_queue = read_channel.work_queue.as_ref().expect("Cannot create terminal node without work queue").clone();
         TerminalNode {
             handler: processor,
             read_channel,
@@ -259,7 +259,7 @@ impl<INPUT: InputGenerator + ChannelBuffer + Send + 'static> TerminalNode<INPUT>
             synchronizer_type,
             queue_monitor,
         );
-        let work_queue = read_channel.work_queue.as_ref().unwrap().clone();
+        let work_queue = read_channel.work_queue.as_ref().expect("Cannot create terminal node without work queue").clone();
 
         Self {
             id,
@@ -294,7 +294,7 @@ pub trait SourceProcessor: Sync + Send {
     /// will receive this data and process it at need.
     fn handle(
         &mut self,
-        output: MutexGuard<TypedWriteChannel<Self::OUTPUT>>,
+        output: ProcessorWriter<Self::OUTPUT>,
     ) -> Result<(), RustedPipeError>;
 }
 

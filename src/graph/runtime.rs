@@ -1,9 +1,9 @@
 use super::{
     graph::{ProcessorWorker, WorkerStatus},
     metrics::{ProfilerTag, BufferMonitorBuilder, BufferMonitor},
-    processor::Processors,
+    processor::{Processors},
 };
-use crate::channels::{read_channel::ReadChannel};
+use crate::{channels::{read_channel::ReadChannel, typed_write_channel::TypedWriteChannel}, packet::work_queue::WorkQueue};
 use crate::channels::ReadChannelTrait;
 use crate::channels::WriteChannelTrait;
 use crate::graph::graph::GraphStatus;
@@ -14,12 +14,12 @@ use crate::{
 use atomic::{Atomic, Ordering};
 use crossbeam::channel::Sender;
 use lazy_static::lazy_static;
-use log::debug;
+use log::{debug, warn};
 use prometheus::{histogram_opts, register_histogram_vec};
 use prometheus::{Histogram, HistogramVec};
 use rusty_pool::ThreadPool;
 use std::{
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, PoisonError},
     thread,
     time::Duration
 };
@@ -60,12 +60,15 @@ where
     id: String,
     running: Arc<Atomic<GraphStatus>>,
     _free: Wait,
-    worker: ProcessorWorker<INPUT, OUTPUT>,
     done_notification: Sender<String>,
     thread_pool: ThreadPool,
     metrics_timer: Histogram,
     work_metrics: BufferMonitor,
     profiler: Arc<ProfilerTag>,
+    shared_writer: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
+    shared_processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
+    status: Arc<Atomic<WorkerStatus>>,
+    work_queue: Option<WorkQueue<INPUT::INPUT>>
 }
 
 impl<INPUT, OUTPUT> ConsumerThread<INPUT, OUTPUT>
@@ -84,27 +87,39 @@ where
     ) -> Self {
         let metrics_timer = METRICS_TIMER.with_label_values(&[&id]);
         let work_metrics = BufferMonitorBuilder::new(&id).make_channel("_work_consumer");
+        
+        let mut shared_writer = None;
+        if let Some(channel) = worker.write_channel {
+            shared_writer = Some(Arc::new(Mutex::new(channel)));
+        }
+       
+        let shared_processor = Arc::new(Mutex::new(worker.processor));
+        let status = Arc::new(Atomic::new(WorkerStatus::Idle));
+        let work_queue = worker.work_queue;
         Self {
             id,
             running,
             _free: free,
-            worker,
             done_notification,
             thread_pool,
             metrics_timer,
             work_metrics,
             profiler: Arc::new(profiler),
+            shared_writer,
+            shared_processor,
+            status,
+            work_queue
         }
     }
 
     pub(super) fn consume(&mut self) {
         self.profiler.add("consumer".to_string(), self.id.clone());
         while self.running.load(Ordering::Relaxed) != GraphStatus::Terminating {
-            if self.worker.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
-                let lock_status = self.worker.status.clone();
+            if self.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
+                let lock_status = self.status.clone();
 
                 let mut packet = None;
-                if let Some(work_queue) = self.worker.work_queue.as_ref() {
+                if let Some(work_queue) = self.work_queue.as_ref() {
                     let task = work_queue.get(Some(Duration::from_millis(100)));
                     if let Ok(read_event) = task {
                         packet = Some(read_event.packet_data);
@@ -114,31 +129,48 @@ where
                             == GraphStatus::WaitingForDataToTerminate
                         {
                             debug!("Sending done {}", self.id);
-                            self.done_notification.send(self.id.clone()).unwrap();
+                            let _ = self.done_notification.send(self.id.clone());
                         }
 
                         continue;
                     }
                 }
-                self.worker
-                    .status
-                    .store(WorkerStatus::Running, Ordering::Relaxed);
+                self.status.store(WorkerStatus::Running, Ordering::Relaxed);
 
-                let processor_clone = self.worker.processor.clone();
+                let processor_clone = self.shared_processor.clone();
                 let id_thread = self.id.clone();
-                let arc_write_channel = self.worker.write_channel.clone();
+                let arc_write_channel = self.shared_writer.clone();
                 let done_clone = self.done_notification.clone();
                 let metrics_clone = self.metrics_timer.clone();
 
                 let future = move || {
                     let timer = metrics_clone.start_timer();
-                    let result = match &mut *processor_clone.lock().unwrap() {
+                    let result = match &mut *processor_clone.lock().unwrap_or_else(PoisonError::into_inner) {
                         Processors::Processor(proc) => {
-                            proc.handle(packet.unwrap(), arc_write_channel.unwrap().lock().unwrap())
+                            if let Some(packet) = packet {
+                                let write_channel = arc_write_channel.expect(&format!("Consumer thread for node {} was created without write channel", id_thread));
+                                let write_channel = write_channel.lock().unwrap_or_else(PoisonError::into_inner);
+                                
+                                proc.handle(packet, write_channel)
+                            } else {
+                                warn!("Packet is None, not processing");
+                                return;
+                            }
+
                         }
-                        Processors::TerminalProcessor(proc) => proc.handle(packet.unwrap()),
+                        Processors::TerminalProcessor(proc) => {
+                            if let Some(packet) = packet {
+                                proc.handle(packet)
+                            } else {
+                                warn!("Packet is None, not processing");
+                                return;
+                            }
+                        },
                         Processors::SourceProcessor(proc) => {
-                            proc.handle(arc_write_channel.unwrap().lock().unwrap())
+                            let write_channel = arc_write_channel.expect(&format!("Consumer thread for node {} was created without write channel", id_thread));
+                            let write_channel = write_channel.lock().unwrap_or_else(PoisonError::into_inner);
+                            
+                            proc.handle(write_channel)
                         }
                     };
                     timer.observe_duration();
@@ -147,7 +179,7 @@ where
                         Err(RustedPipeError::EndOfStream()) => {
                             eprintln!("Terminating worker {id_thread:?}");
                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
-                            done_clone.send(id_thread.clone()).unwrap();
+                            let _ = done_clone.send(id_thread.clone());
                         }
                         Err(err) => {
                             eprintln!("Error in worker {id_thread:?}: {err:?}");
@@ -160,15 +192,14 @@ where
                 let handle = self.thread_pool.evaluate(future);
                 if let Err(_) = handle.try_await_complete() {
                     eprintln!("Thread panicked in worker {:?}", self.id.clone());
-                    self.worker
-                        .status
+                    self.status
                         .store(WorkerStatus::Idle, Ordering::Relaxed);
                 }
             } else {
                 thread::sleep(Duration::from_millis(100));
                 if self.running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
                     debug!("Sending done {}", self.id);
-                    self.done_notification.send(self.id.clone()).unwrap();
+                   let _ = self.done_notification.send(self.id.clone());
                 }
             }
         }

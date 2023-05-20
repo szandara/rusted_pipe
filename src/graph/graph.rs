@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, RwLock},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -115,9 +115,8 @@ impl Graph {
                     id.clone(),
                     ProcessorWorker::<INPUT, OUTPUT> {
                         work_queue: Some(work_queue_processor),
-                        processor: Arc::new(Mutex::new(Processors::Processor(handler))),
-                        write_channel: Some(Arc::new(Mutex::new(write_channel))),
-                        status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+                        processor: Processors::Processor(handler),
+                        write_channel: Some(write_channel),
                     },
                 )
             }
@@ -125,9 +124,8 @@ impl Graph {
                 node.id.clone(),
                 ProcessorWorker {
                     work_queue: None,
-                    processor: Arc::new(Mutex::new(Processors::SourceProcessor(node.handler))),
-                    write_channel: Some(Arc::new(Mutex::new(node.write_channel))),
-                    status: Arc::new(Atomic::new(WorkerStatus::Idle)),
+                    processor: Processors::SourceProcessor(node.handler),
+                    write_channel: Some(node.write_channel),
                 },
             ),
             Nodes::TerminalNode(node) => {
@@ -149,9 +147,8 @@ impl Graph {
                     id_clone,
                     ProcessorWorker {
                         work_queue: Some(work_queue_processor),
-                        processor: Arc::new(Mutex::new(Processors::TerminalProcessor(handler))),
+                        processor: Processors::TerminalProcessor(handler),
                         write_channel: None,
-                        status: Arc::new(Atomic::new(WorkerStatus::Idle)),
                     },
                 )
             }
@@ -258,10 +255,10 @@ impl Graph {
                     self.node_threads.len()
                 );
                 if let Some(duration) = timeout {
-                    let done = self.worker_done.1.recv_timeout(duration).unwrap();
+                    let done = self.worker_done.1.recv_timeout(duration).expect("Waiting for consumer nodes: Did not receive all done messages on time");
                     empty_set.insert(done);
                 } else {
-                    let done = self.worker_done.1.recv().unwrap();
+                    let done = self.worker_done.1.recv().expect("Waiting for consumer nodes: Synchronization channels have been closed. Terminating graph without waiting.");
                     empty_set.insert(done);
                 }
             }
@@ -276,10 +273,10 @@ impl Graph {
                     self.read_threads.len()
                 );
                 if let Some(duration) = timeout {
-                    let done = self.reader_empty.1.recv_timeout(duration).unwrap();
+                    let done = self.reader_empty.1.recv_timeout(duration).expect("Waiting for reader nodes: Did not receive all done messages on time");
                     empty_receiver_set.insert(done);
                 } else {
-                    let done = self.reader_empty.1.recv().unwrap();
+                    let done = self.reader_empty.1.recv().expect("Waiting for reader nodes: Synchronization channels have been closed. Terminating graph without waiting.");
                     empty_receiver_set.insert(done);
                 }
             }
@@ -291,13 +288,13 @@ impl Graph {
         let keys = self.node_threads.keys().cloned().collect_vec();
         for id in keys {
             println!("Waiting for node {id} to stop");
-            self.node_threads.remove(&id).unwrap().join().unwrap();
+            self.node_threads.remove(&id).expect("Thread ID not found").join().expect(&format!("Cannot join thread {id}"));
         }
 
         let keys = self.read_threads.keys().cloned().collect_vec();
         for id in keys {
             println!("Waiting for reader {id} to stop");
-            self.read_threads.remove(&id).unwrap().join().unwrap();
+            self.read_threads.remove(&id).expect("Thread ID not found").join().expect(&format!("Cannot join thread {id}"));
         }
         println!("Waiting for metrics to stop");
         self.metrics.stop();
@@ -309,9 +306,8 @@ pub(super) struct ProcessorWorker<
     OUTPUT: WriteChannelTrait + Send + 'static,
 > {
     pub work_queue: Option<WorkQueue<INPUT::INPUT>>,
-    pub processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
-    pub write_channel: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
-    pub status: Arc<Atomic<WorkerStatus>>,
+    pub processor: Processors<INPUT, OUTPUT>,
+    pub write_channel: Option<TypedWriteChannel<OUTPUT>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -112,7 +112,8 @@ macro_rules! read_channels {
                         continue;
                     }
                     if let Some(val) = val {
-                        if val.timestamp_ns < min.unwrap().timestamp_ns  {
+                        // Safe to unwrap here
+                        if val.timestamp_ns < min.unwrap_or(val).timestamp_ns  {
                             min = Some(val);
                         }
                     }

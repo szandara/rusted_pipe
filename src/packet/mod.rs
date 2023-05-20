@@ -31,7 +31,7 @@ impl DataVersion {
         DataVersion {
             timestamp_ns: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("Cannot calculate epoch")
                 .as_nanos(),
         }
     }

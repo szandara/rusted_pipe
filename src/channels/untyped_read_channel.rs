@@ -132,18 +132,15 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
 
         if let Ok(channel) = select.ready_timeout(timeout) {
             if let Some(ch) = self.connected_channels.get(channel) {
-                let mut buffer = self.buffered_data.get_mut(&*ch);
-                let msg = buffer
-                    .as_ref()
-                    .unwrap()
-                    .channel
-                    .as_ref()
-                    .unwrap()
+                if let Some(buffer) = self.buffered_data.get_mut(&*ch) {
+                    let msg = buffer.channel.as_ref()
+                    .expect("Buffer has not receiver channel. This is a bug")
                     .receiver
                     .recv()?;
 
-                buffer.as_mut().unwrap().buffer.insert(msg)?;
+                    buffer.buffer.insert(msg)?;
                 return Ok(Some(ch));
+                }
             }
         }
         Ok(None)

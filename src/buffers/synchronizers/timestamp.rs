@@ -6,7 +6,7 @@ use crate::{
 use super::{exact_synchronize, PacketSynchronizer};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 /// A synchronizer mostly used for offline computations. It always tries to match
@@ -19,7 +19,7 @@ pub struct TimestampSynchronizer {}
 impl PacketSynchronizer for TimestampSynchronizer {
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+        ordered_buffer: Arc<RwLock<dyn ChannelBuffer>>,
     ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
         exact_synchronize(ordered_buffer.clone())
     }
@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn test_timestamp_synchronize_returns_all_data() {
         let buffer = create_test_buffer();
-        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let safe_buffer = Arc::new(RwLock::new(buffer));
         let mut test_synch = TimestampSynchronizer::default();
 
         add_data(safe_buffer.clone(), "c1".to_string(), 2);
@@ -59,7 +59,7 @@ mod tests {
         check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(2); 3]);
 
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), true);
 
@@ -67,7 +67,7 @@ mod tests {
         check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(3); 3]);
 
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), true);
 
@@ -76,10 +76,10 @@ mod tests {
         check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(4); 3]);
 
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), true);
 
-        assert!(safe_buffer.lock().unwrap().are_buffers_empty());
+        assert!(safe_buffer.read().unwrap().are_buffers_empty());
     }
 }

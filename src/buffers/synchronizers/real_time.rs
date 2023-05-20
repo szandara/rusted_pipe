@@ -4,11 +4,11 @@ use crate::buffers::BufferIterator;
 use crate::channels::read_channel::ChannelBuffer;
 use crate::channels::ChannelID;
 use crate::DataVersion;
-
+use crate::unwrap_or_return;
 use std::cmp::{min, Reverse};
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::iter::Peekable;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock, PoisonError};
 
 /// A synchronizer mostly used for run time computations. It has several configuration
 /// parameters that allow the handling of different use cases when dealing with
@@ -203,6 +203,7 @@ fn find_common_min<'a>(
 
         let matches = extract_matches(&buffers_tolerance, wait_all);
 
+        // Safe unwrap
         if matches.is_none() || wait_all && matches.as_ref().unwrap().contains(&None) {
             if let Some(nt) = new_targets.pop() {
                 target = nt.0;
@@ -223,17 +224,19 @@ fn find_common_min<'a>(
 impl PacketSynchronizer for RealTimeSynchronizer {
     fn synchronize(
         &mut self,
-        ordered_buffer: Arc<Mutex<dyn ChannelBuffer>>,
+        ordered_buffer: Arc<RwLock<dyn ChannelBuffer>>,
     ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
-        let locked = ordered_buffer.lock().unwrap();
-        let min_version = locked.min_version();
-        if min_version.is_none() {
-            return None;
-        }
+        let locked = ordered_buffer.read().unwrap_or_else(PoisonError::into_inner);
+        let min_version = if let Some(min_version) = locked.min_version() {min_version} else {return None};
+
         let mut iters = vec![];
 
         for channel in locked.available_channels().clone().into_iter() {
-            iters.push(locked.iterator(&channel).unwrap());
+            let iterator = if let Some(iterator) = locked.iterator(&channel) {iterator} else {
+                eprintln!("Cannot synchronize because {channel} iterator is not available");
+                return None;
+            };
+            iters.push(iterator);
         }
         let mut wait_all = self.wait_all;
         if !self.has_buffered && !self.all_channels_have_data {
@@ -244,7 +247,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
             iters,
             self.tolerance_ns,
             self.last_returned.unwrap_or(0),
-            min_version.unwrap().timestamp_ns,
+            min_version.timestamp_ns,
             wait_all,
         );
 
@@ -271,13 +274,25 @@ impl PacketSynchronizer for RealTimeSynchronizer {
                 }
             }
 
-            let versions_map: HashMap<ChannelID, Option<DataVersion>> = locked
+            let versions_map: Option<HashMap<ChannelID, Option<DataVersion>>> = locked
                 .available_channels()
                 .iter()
                 .enumerate()
-                .map(|(i, c)| (ChannelID::from(c), common_min.get(i).unwrap().clone()))
+                .map(|(i, c)| Some((ChannelID::from(c), common_min.get(i)?.clone())))
                 .collect();
-            self.last_returned = Some(versions_map.values().max().unwrap().unwrap().timestamp_ns);
+
+            let versions_map = unwrap_or_return!(versions_map);
+
+            let max_v = if let Some(val) = versions_map.values().max() { val } else {
+                eprintln!("Cannot find max value in synchronization. Returning None");
+                return None;
+            };
+
+            let max_v = if let Some(val) = max_v { val } else {
+                eprintln!("Cannot find max value in synchronization. Returning None");
+                return None;
+            };
+            self.last_returned = Some(max_v.timestamp_ns);
             return Some(versions_map);
         }
 
@@ -298,7 +313,7 @@ mod tests {
     #[test]
     fn test_realtime_synchronize_returns_all_data() {
         let buffer = create_test_buffer();
-        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let safe_buffer = Arc::new(RwLock::new(buffer));
         let mut test_synch = RealTimeSynchronizer::new(0, true, false);
 
         add_data(safe_buffer.clone(), "c1".to_string(), 1);
@@ -317,7 +332,7 @@ mod tests {
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(1); 3]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
@@ -330,7 +345,7 @@ mod tests {
     #[test]
     fn test_realtime_synchronize_if_with_tolerance() {
         let buffer = create_test_buffer();
-        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let safe_buffer = Arc::new(RwLock::new(buffer));
         let mut test_synch = RealTimeSynchronizer::new(2, true, false);
 
         add_data(safe_buffer.clone(), "c1".to_string(), 1);
@@ -352,7 +367,7 @@ mod tests {
             vec![Some(1), Some(1), Some(2)],
         );
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
@@ -368,7 +383,7 @@ mod tests {
     #[test]
     fn test_realtime_synchronize_if_not_wait_all() {
         let buffer = create_test_buffer();
-        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let safe_buffer = Arc::new(RwLock::new(buffer));
         let mut test_synch = RealTimeSynchronizer::new(2, false, false);
 
         add_data(safe_buffer.clone(), "c1".to_string(), 1);
@@ -382,7 +397,7 @@ mod tests {
         check_packet_set_contains_versions(first_sync.as_ref().unwrap(), vec![Some(1), None, None]);
 
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&first_sync.unwrap(), false);
 
@@ -392,7 +407,7 @@ mod tests {
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(2), None, Some(2)]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
@@ -401,14 +416,14 @@ mod tests {
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(3), None, None]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(4), Some(4), None]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
@@ -419,7 +434,7 @@ mod tests {
     #[test]
     fn test_realtime_synchronize_if_not_wait_all_with_buffering() {
         let buffer = create_test_buffer();
-        let safe_buffer = Arc::new(Mutex::new(buffer));
+        let safe_buffer = Arc::new(RwLock::new(buffer));
         let mut test_synch = RealTimeSynchronizer::new(2, false, true);
 
         add_data(safe_buffer.clone(), "c1".to_string(), 1);
@@ -440,14 +455,14 @@ mod tests {
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(1), Some(1), None]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(2), None, Some(2)]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
@@ -456,7 +471,7 @@ mod tests {
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(3), None, None]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
@@ -465,14 +480,14 @@ mod tests {
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(4), Some(4), None]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(5), None, Some(5)]);
         safe_buffer
-            .lock()
+            .write()
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
     }
