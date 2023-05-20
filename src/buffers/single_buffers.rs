@@ -10,6 +10,10 @@ type _RingBuffer<T> = AllocRingBuffer<Packet<T>>;
 pub trait LenTrait {
     /// Current length of the buffer.
     fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Trait describing an input buffer which composes one of the channels of
@@ -160,10 +164,10 @@ pub struct FixedSizeBTree<T> {
     monitor: BufferMonitor
 }
 
-impl<T> FixedSizeBTree<T> {
+impl<T> Default for FixedSizeBTree<T> {
     /// Creates a new instance with a 1000 size and
     /// will drop if passed.
-    pub fn default() -> Self {
+    fn default() -> Self {
         FixedSizeBTree {
             data: Default::default(),
             max_size: 1000,
@@ -171,6 +175,9 @@ impl<T> FixedSizeBTree<T> {
             monitor: BufferMonitor::default()
         }
     }
+}
+
+impl<T> FixedSizeBTree<T> {
     /// Creates a new instance.
     ///
     /// * Arguments

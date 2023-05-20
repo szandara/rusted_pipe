@@ -87,7 +87,7 @@ impl From<&&ChannelID> for ChannelID {
 
 impl std::cmp::PartialEq<str> for ChannelID {
     fn eq(&self, other: &str) -> bool {
-        &self.id == other
+        self.id == other
     }
 }
 

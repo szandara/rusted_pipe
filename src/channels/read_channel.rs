@@ -206,12 +206,11 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         if monitor {
             monitor_builder = BufferMonitorBuilder::new(id);
         }
-        let work_monitor;
-        if monitor {
-            work_monitor = monitor_builder.make_channel("_work_queue");
+        let work_monitor= if monitor {
+            monitor_builder.make_channel("_work_queue")
         } else {
-            work_monitor = BufferMonitor::default();
-        }
+            BufferMonitor::default()
+        };
 
         let work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size));
     

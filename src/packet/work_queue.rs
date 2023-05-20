@@ -30,8 +30,8 @@ impl<T> LenTrait for WorkQueue<T> {
     }
 }
 
-impl<T> WorkQueue<T> {
-    pub fn default() -> Self {
+impl<T> Default for WorkQueue<T> {
+    fn default() -> Self {
         let (notifier, queue) = unbounded::<ReadEvent<T>>();
         WorkQueue {
             queue,
@@ -39,7 +39,10 @@ impl<T> WorkQueue<T> {
             max_in_queue: std::usize::MAX,
         }
     }
+}
 
+impl<T> WorkQueue<T> {
+    
     pub fn new(max_in_queue: usize) -> Self {
         let (notifier, queue) = bounded::<ReadEvent<T>>(max_in_queue);
         WorkQueue {

@@ -201,7 +201,7 @@ impl Graph {
 
         let profiler: Option<_> = self.metrics.profiler().as_ref().map(|profiler| profiler.profiler.tag_wrapper());
 
-        if self
+        let existing = self
             .node_threads
             .insert(
                 node_id.clone(),
@@ -222,9 +222,8 @@ impl Graph {
                     );
                     consumer.consume();
                 }),
-            )
-            .is_some()
-        {
+            );
+        if existing.is_some() {
             panic!("Node {node_id} already started!");
         }
 
