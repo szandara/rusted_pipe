@@ -162,19 +162,12 @@ pub fn spawn_metrics_server(prometheus_addr: &str) -> MetricsServer {
     }
 }
 
+#[derive(Default)]
 pub struct BufferMonitor {
     metrics: Option<GenericGauge<prometheus::core::AtomicI64>>
 }
 
-impl Default  for BufferMonitor {
 
-    fn default() -> Self {
-        Self {
-           metrics: None
-        }
-    }
-
-}
 
 pub struct BufferMonitorBuilder{
     node_id: Option<String>

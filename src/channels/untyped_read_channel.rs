@@ -132,7 +132,7 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
 
         if let Ok(channel) = select.ready_timeout(timeout) {
             if let Some(ch) = self.connected_channels.get(channel) {
-                if let Some(buffer) = self.buffered_data.get_mut(&*ch) {
+                if let Some(buffer) = self.buffered_data.get_mut(ch) {
                     let msg = buffer.channel.as_ref()
                     .expect("Buffer has not receiver channel. This is a bug")
                     .receiver
@@ -160,7 +160,7 @@ impl<'a> ChannelBuffer for UntypedReadChannel {
                 }
             }
         }
-        return min;
+        min
     }
 }
 
@@ -175,7 +175,7 @@ impl InputGenerator for UntypedReadChannel {
         let mut packet_set = IndexMap::<ChannelID, Option<UntypedPacket>>::default();
 
         data_versions.iter().for_each(|(channel_id, data_version)| {
-            match self.get_channel_mut(&channel_id) {
+            match self.get_channel_mut(channel_id) {
                 Some(channel) => {
                     let data = get_data(&mut channel.buffer, data_version, exact_match);
                     if let Some(data) = data {

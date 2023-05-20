@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Condvar, Mutex, RwLock},
+    sync::{Arc, Condvar, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -112,7 +112,7 @@ impl Graph {
 
                 let work_queue_processor = work_queue;
                 (
-                    id.clone(),
+                    id,
                     ProcessorWorker::<INPUT, OUTPUT> {
                         work_queue: Some(work_queue_processor),
                         processor: Processors::Processor(handler),
@@ -199,10 +199,7 @@ impl Graph {
         let thread_clone = self.pool.clone();
         let id_move = node_id.clone();
 
-        let profiler: Option<_> = match self.metrics.profiler().as_ref() {
-            Some(profiler) => Some(profiler.profiler.tag_wrapper()),
-            None => None,
-        };
+        let profiler: Option<_> = self.metrics.profiler().as_ref().map(|profiler| profiler.profiler.tag_wrapper());
 
         if self
             .node_threads
@@ -231,7 +228,7 @@ impl Graph {
             panic!("Node {node_id} already started!");
         }
 
-        self.thread_control.push(wait.clone());
+        self.thread_control.push(wait);
         println!("Done Starting Node {node_id}");
     }
 
@@ -288,13 +285,13 @@ impl Graph {
         let keys = self.node_threads.keys().cloned().collect_vec();
         for id in keys {
             println!("Waiting for node {id} to stop");
-            self.node_threads.remove(&id).expect("Thread ID not found").join().expect(&format!("Cannot join thread {id}"));
+            self.node_threads.remove(&id).expect("Thread ID not found").join().unwrap_or_else(|_| panic!("Cannot join thread {id}"));
         }
 
         let keys = self.read_threads.keys().cloned().collect_vec();
         for id in keys {
             println!("Waiting for reader {id} to stop");
-            self.read_threads.remove(&id).expect("Thread ID not found").join().expect(&format!("Cannot join thread {id}"));
+            self.read_threads.remove(&id).expect("Thread ID not found").join().unwrap_or_else(|_| panic!("Cannot join thread {id}"));
         }
         println!("Waiting for metrics to stop");
         self.metrics.stop();

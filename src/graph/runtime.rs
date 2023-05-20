@@ -1,12 +1,12 @@
 use super::{
-    graph::{ProcessorWorker, WorkerStatus},
+    build::{ProcessorWorker, WorkerStatus},
     metrics::{ProfilerTag, BufferMonitorBuilder, BufferMonitor},
     processor::{Processors},
 };
 use crate::{channels::{read_channel::ReadChannel, typed_write_channel::TypedWriteChannel}, packet::work_queue::WorkQueue};
 use crate::channels::ReadChannelTrait;
 use crate::channels::WriteChannelTrait;
-use crate::graph::graph::GraphStatus;
+use crate::graph::build::GraphStatus;
 use crate::{
     channels::read_channel::{ChannelBuffer, InputGenerator},
     RustedPipeError,
@@ -43,7 +43,7 @@ pub(super) fn read_channel_data<T: InputGenerator + ChannelBuffer + Send>(
 ) where
     T: ChannelBuffer + 'static,
 {
-    let id = id.to_string();
+    let id = id;
     while running.load(Ordering::Relaxed) != GraphStatus::Terminating {
         read_channel.read(id.clone(), done_notification.clone());
     }
@@ -186,11 +186,11 @@ where
                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
                         }
                     };
-                    ()
+                    
                 };
 
                 let handle = self.thread_pool.evaluate(future);
-                if let Err(_) = handle.try_await_complete() {
+                if handle.try_await_complete().is_err() {
                     eprintln!("Thread panicked in worker {:?}", self.id.clone());
                     self.status
                         .store(WorkerStatus::Idle, Ordering::Relaxed);

@@ -75,7 +75,7 @@ impl<
         read_channel: ReadChannel<INPUT>,
         writer_channel: OUTPUT,
     ) -> Node<INPUT, OUTPUT> {
-        let id = id.clone();
+        let id = id;
         let write_channel = TypedWriteChannel {
             writer: Box::new(writer_channel),
         };
@@ -164,7 +164,7 @@ impl<OUTPUT: WriteChannelTrait + 'static> SourceNode<OUTPUT> {
         let write_channel = TypedWriteChannel {
             writer: Box::new(writer_channel),
         };
-        let id = id.clone();
+        let id = id;
         SourceNode {
             handler: processor,
             write_channel,
@@ -218,7 +218,7 @@ impl<INPUT: InputGenerator + ChannelBuffer + Send + 'static> TerminalNode<INPUT>
         processor: Box<dyn TerminalProcessor<INPUT = INPUT>>,
         read_channel: ReadChannel<INPUT>,
     ) -> TerminalNode<INPUT> {
-        let id = id.clone();
+        let id = id;
         let work_queue = read_channel.work_queue.as_ref().expect("Cannot create terminal node without work queue").clone();
         TerminalNode {
             handler: processor,

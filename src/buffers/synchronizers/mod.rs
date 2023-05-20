@@ -37,7 +37,7 @@ fn exact_synchronize(
 ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
     let min_version = get_min_versions(ordered_buffer);
 
-    let version = if let Some(version) = min_version.values().next() {version} else {return None;};
+    let version = min_version.values().next()?;
     if min_version.values().all(|v| v.is_some()) && min_version.values().all(|v| v == version) {
         return Some(min_version);
     }
@@ -121,7 +121,7 @@ pub mod tests {
                 .unwrap()
                 .c1()
                 .buffer
-                .insert(packet.clone())
+                .insert(packet)
                 .unwrap();
         } else if channel_id == "c2" {
             buffer
@@ -129,7 +129,7 @@ pub mod tests {
                 .unwrap()
                 .c2()
                 .buffer
-                .insert(packet.clone())
+                .insert(packet)
                 .unwrap();
         } else if channel_id == "c3" {
             buffer
@@ -137,7 +137,7 @@ pub mod tests {
                 .unwrap()
                 .c3()
                 .buffer
-                .insert(packet.clone())
+                .insert(packet)
                 .unwrap();
         }
     }
@@ -151,7 +151,7 @@ pub mod tests {
         add_data(safe_buffer.clone(), "c1".to_string(), 2);
         add_data(safe_buffer.clone(), "c1".to_string(), 3);
 
-        let packet_set = exact_synchronize(safe_buffer.clone());
+        let packet_set = exact_synchronize(safe_buffer);
         assert!(packet_set.is_none());
     }
 }

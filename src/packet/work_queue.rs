@@ -19,7 +19,7 @@ impl<T> Clone for WorkQueue<T> {
         Self {
             notifier: self.notifier.clone(),
             queue: self.queue.clone(),
-            max_in_queue: self.max_in_queue.clone(),
+            max_in_queue: self.max_in_queue,
         }
     }
 }

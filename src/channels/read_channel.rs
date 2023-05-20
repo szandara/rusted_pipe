@@ -266,7 +266,7 @@ pub fn get_data<T>(
             break;
         }
     }
-    return None;
+    None
 }
 
 #[cfg(test)]
@@ -297,7 +297,7 @@ mod tests {
         ReadChannel<ReadChannel2<String, String>>,
         SenderChannel<String>,
     ) {
-        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let synch_strategy = Box::<TimestampSynchronizer>::default();
         let read_channel2 = ReadChannel2::create(
             RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
             RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
@@ -328,7 +328,7 @@ mod tests {
 
     fn create_untyped_read_channel(
     ) -> (ReadChannel<UntypedReadChannel>, SenderChannel<Box<Untyped>>) {
-        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let synch_strategy = Box::<TimestampSynchronizer>::default();
         let read_channel2 = UntypedReadChannel::default();
         let read_channel =
             ReadChannel::new(synch_strategy, Some(WorkQueue::default()), read_channel2);
@@ -420,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_read_channel_try_read_returns_error_when_buffer_is_full() {
-        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let synch_strategy = Box::<TimestampSynchronizer>::default();
         let read_channel2 = ReadChannel2::create(
             RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
             RtRingBuffer::<String>::new(2, true, BufferMonitor::default()),
@@ -456,7 +456,7 @@ mod tests {
         s1.send(packet.clone()).unwrap();
 
         packet.version.timestamp_ns = 3;
-        s1.send(packet.clone()).unwrap();
+        s1.send(packet).unwrap();
         //assert!(read_channel.read("c1".to_string(), done.0));
         assert!(read_channel
             .channels

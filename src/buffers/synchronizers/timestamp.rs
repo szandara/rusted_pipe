@@ -56,7 +56,7 @@ mod tests {
         add_data(safe_buffer.clone(), "c3".to_string(), 4);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
-        check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(2); 3]);
+        check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(2); 3]);
 
         safe_buffer
             .write()
@@ -64,7 +64,7 @@ mod tests {
             .get_packets_for_version(&synch.unwrap(), true);
 
         let synch = test_synch.synchronize(safe_buffer.clone());
-        check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(3); 3]);
+        check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(3); 3]);
 
         safe_buffer
             .write()
@@ -73,7 +73,7 @@ mod tests {
 
         add_data(safe_buffer.clone(), "c2".to_string(), 4);
         let synch = test_synch.synchronize(safe_buffer.clone());
-        check_packet_set_contains_versions(&synch.as_ref().unwrap(), vec![Some(4); 3]);
+        check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(4); 3]);
 
         safe_buffer
             .write()

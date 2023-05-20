@@ -1,12 +1,12 @@
-pub mod graph;
+pub mod build;
 pub mod metrics;
 pub mod processor;
 pub mod runtime;
 
 #[cfg(test)]
 mod tests {
-    use super::graph::link;
-    use super::graph::Graph;
+    use super::build::link;
+    use super::build::Graph;
     use super::metrics::BufferMonitor;
     use super::metrics::Metrics;
     use super::processor::SourceNode;
@@ -164,7 +164,7 @@ mod tests {
         buffer_size: usize,
         block_full: bool,
     ) -> TerminalNode<ReadChannel2<String, String>> {
-        let synch_strategy = Box::new(TimestampSynchronizer::default());
+        let synch_strategy = Box::<TimestampSynchronizer>::default();
         let read_channel2 = ReadChannel2::create(
             RtRingBuffer::<String>::new(buffer_size, block_full, BufferMonitor::default()),
             RtRingBuffer::<String>::new(buffer_size, block_full, BufferMonitor::default()),
@@ -194,7 +194,7 @@ mod tests {
         let mut node1 = create_source_node(node1);
 
         let (output, output_check) = unbounded();
-        let process_terminal = TestNodeConsumer::new(output.clone(), consume_time_ms);
+        let process_terminal = TestNodeConsumer::new(output, consume_time_ms);
         let process_terminal =
             create_consumer_node(process_terminal, consumer_queue_strategy, 2000, false);
 
@@ -427,7 +427,7 @@ mod tests {
         let mut node1 = create_source_node(node1);
 
         let (output, output_check) = unbounded();
-        let process_terminal = TestNodeConsumer::new(output.clone(), 0);
+        let process_terminal = TestNodeConsumer::new(output, 0);
 
         let process_terminal =
             create_consumer_node(process_terminal, WorkQueue::default(), 2, block_full);

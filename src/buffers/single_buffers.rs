@@ -291,7 +291,7 @@ mod fixed_size_buffer_tests {
         let max_size = 32;
         for i in 0..(max_size + 10) as u128 {
             let version = DataVersion { timestamp_ns: i };
-            let packet = Packet::<String>::new("test".to_string(), version.clone());
+            let packet = Packet::<String>::new("test".to_string(), version);
             buffer.insert(packet).unwrap();
             if i >= max_size as u128 {
                 assert_eq!(
@@ -307,7 +307,7 @@ mod fixed_size_buffer_tests {
     fn test_buffer_contains_key_returns_expected<T: FixedSizeBuffer<Data = String>>(mut buffer: T) {
         for i in 0..3 {
             let version = DataVersion { timestamp_ns: i };
-            let packet = Packet::<String>::new("test".to_string(), version.clone());
+            let packet = Packet::<String>::new("test".to_string(), version);
             buffer.insert(packet).unwrap();
             assert!(buffer.contains_key(&DataVersion { timestamp_ns: i }));
         }
@@ -318,19 +318,19 @@ mod fixed_size_buffer_tests {
         mut buffer: T,
     ) {
         let version = DataVersion { timestamp_ns: 1 };
-        let packet = Packet::<String>::new("test".to_string(), version.clone());
+        let packet = Packet::<String>::new("test".to_string(), version);
         buffer.insert(packet).unwrap();
         assert!(buffer.contains_key(&DataVersion { timestamp_ns: 1 }));
 
         let version = DataVersion { timestamp_ns: 0 };
-        let packet = Packet::<String>::new("test".to_string(), version.clone());
+        let packet = Packet::<String>::new("test".to_string(), version);
         assert!(buffer.insert(packet).is_err());
     }
 
     fn test_buffer_get_returns_expected_data<T: FixedSizeBuffer<Data = String>>(mut buffer: T) {
         for i in 0..3 {
             let version = DataVersion { timestamp_ns: i };
-            let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
+            let packet = Packet::<String>::new(format!("test {}", i).to_string(), version);
             buffer.insert(packet).unwrap();
             let data = buffer.get(&DataVersion { timestamp_ns: i }).unwrap();
             assert_eq!(*data.data, format!("test {}", i).to_string());
@@ -342,7 +342,7 @@ mod fixed_size_buffer_tests {
     ) {
         for i in 0..3 {
             let version = DataVersion { timestamp_ns: i };
-            let packet = Packet::<String>::new(format!("test {}", i).to_string(), version.clone());
+            let packet = Packet::<String>::new(format!("test {}", i).to_string(), version);
             if i == 2 {
                 assert_eq!(buffer.insert(packet).unwrap_err(), BufferError::BufferFull);
             } else {

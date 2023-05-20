@@ -22,7 +22,7 @@ impl<U: Clone + 'static> BufferWriter<U> {
     pub fn write(&self, data: U, version: &DataVersion) -> Result<(), ChannelError> {
         self.channels
             .iter()
-            .try_for_each(|sender| sender.send(Packet::<U>::new(data.clone(), version.clone())))?;
+            .try_for_each(|sender| sender.send(Packet::<U>::new(data.clone(), *version)))?;
         Ok(())
     }
 }

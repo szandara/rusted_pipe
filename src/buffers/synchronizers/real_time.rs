@@ -72,23 +72,20 @@ fn extract_matches(
 
     let buffer_min = buffers
         .iter()
-        .map(|b| {
-            if b.len() > 0 {
-                return Some(b[0]);
+        .filter_map(|b| {
+            if !b.is_empty() {
+                Some(b[0])
             } else {
-                return None;
+                None
             }
         })
-        .flatten()
         .min();
 
-    if buffer_min.is_none() {
-        return None;
-    }
+    buffer_min?;
 
     if let Some(min) = buffer_min {
         for (i, tolerance) in buffers.iter().enumerate() {
-            if tolerance.len() == 0 {
+            if tolerance.is_empty() {
                 continue;
             }
             let target_match = tolerance[0];
@@ -106,7 +103,7 @@ fn extract_matches(
                 }
                 if let Some(min_buffer) = tolerance
                     .iter()
-                    .map(|f| (*f as i128 - target_match as i128).abs() as u128)
+                    .map(|f| (*f as i128 - target_match as i128).unsigned_abs())
                     .min()
                 {
                     if let Some(u_min_min) = min_min {
@@ -128,7 +125,7 @@ fn extract_matches(
             }
         }
     }
-    return Some(matches);
+    Some(matches)
 }
 
 /// Core method of the syncrhonizer that tries to find a matching solution
@@ -208,7 +205,7 @@ fn find_common_min<'a>(
             if let Some(nt) = new_targets.pop() {
                 target = nt.0;
                 for b in buffers_tolerance.iter_mut() {
-                    while b.len() > 0 && b[0] < target - tolerance {
+                    while !b.is_empty() && b[0] < target - tolerance {
                         b.pop_front();
                     }
                 }
@@ -227,12 +224,12 @@ impl PacketSynchronizer for RealTimeSynchronizer {
         ordered_buffer: Arc<RwLock<dyn ChannelBuffer>>,
     ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
         let locked = ordered_buffer.read().unwrap_or_else(PoisonError::into_inner);
-        let min_version = if let Some(min_version) = locked.min_version() {min_version} else {return None};
+        let min_version = locked.min_version()?;
 
         let mut iters = vec![];
 
         for channel in locked.available_channels().clone().into_iter() {
-            let iterator = if let Some(iterator) = locked.iterator(&channel) {iterator} else {
+            let iterator = if let Some(iterator) = locked.iterator(channel) {iterator} else {
                 eprintln!("Cannot synchronize because {channel} iterator is not available");
                 return None;
             };
@@ -278,7 +275,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
                 .available_channels()
                 .iter()
                 .enumerate()
-                .map(|(i, c)| Some((ChannelID::from(c), common_min.get(i)?.clone())))
+                .map(|(i, c)| Some((ChannelID::from(c), *common_min.get(i)?)))
                 .collect();
 
             let versions_map = unwrap_or_return!(versions_map);
@@ -296,7 +293,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
             return Some(versions_map);
         }
 
-        return None;
+        None
     }
 }
 
@@ -338,7 +335,7 @@ mod tests {
 
         add_data(safe_buffer.clone(), "c2".to_string(), 5);
         add_data(safe_buffer.clone(), "c3".to_string(), 5);
-        let synch = test_synch.synchronize(safe_buffer.clone());
+        let synch = test_synch.synchronize(safe_buffer);
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(5); 3]);
     }
 
@@ -373,7 +370,7 @@ mod tests {
 
         add_data(safe_buffer.clone(), "c2".to_string(), 4);
         add_data(safe_buffer.clone(), "c3".to_string(), 5);
-        let synch = test_synch.synchronize(safe_buffer.clone());
+        let synch = test_synch.synchronize(safe_buffer);
         check_packet_set_contains_versions(
             synch.as_ref().unwrap(),
             vec![Some(3), Some(4), Some(5)],
@@ -427,7 +424,7 @@ mod tests {
             .unwrap()
             .get_packets_for_version(&synch.unwrap(), false);
 
-        let synch = test_synch.synchronize(safe_buffer.clone());
+        let synch = test_synch.synchronize(safe_buffer);
         check_packet_set_contains_versions(synch.as_ref().unwrap(), vec![Some(5), None, Some(5)]);
     }
 
