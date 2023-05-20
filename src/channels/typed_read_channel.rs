@@ -5,6 +5,7 @@ use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
 use super::ChannelID;
+use crossbeam::channel::Select;
 use crate::{
 
     buffers::{single_buffers::RtRingBuffer},
@@ -38,7 +39,7 @@ macro_rules! read_channels {
                 $(
                     $T: NamedBufferReceiver<RtRingBuffer<$T>>,
                 )+
-                channels: Vec<ChannelID>
+                channels: Vec<ChannelID>,
             }
         }
 
@@ -72,12 +73,23 @@ macro_rules! read_channels {
                 )+].iter().all(|b| *b)
             }
 
+            fn wait_for_data(&self, timeout: Duration) -> Result<bool, ChannelError>{
+                let mut select = Select::new();
+                $(select.recv(&self.$T.receiver.channel.as_ref().expect(&format!("Node {} has no reader channel {}",
+                    stringify!($struct_name), self.$T.id)).receiver);)+
+                
+                match select.ready_timeout(timeout) {
+                    Err(_) => Ok(false),
+                    Ok(_) => Ok(true),
+                }   
+            }
+
             fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>{
                 let has_data = select! {
                     $(
                         recv(self.$T.receiver.channel
                             .as_ref()
-                            .expect(&format!("Channel not connected {} {}",
+                            .expect(&format!("Node {} has no reader channel {}",
                                 stringify!($struct_name), self.$T.id)).receiver) -> msg =>
                                     {
                                         if self.$T.receiver.buffer.insert(msg?).is_ok() {
@@ -132,7 +144,7 @@ macro_rules! read_channels {
                             id: ChannelID::from(stringify!($T))
                         },
                     )+
-                    channels: vec![$(ChannelID::from(stringify!($T)),)+]
+                    channels: vec![$(ChannelID::from(stringify!($T)),)+],
                 }
             }
 
@@ -233,6 +245,10 @@ impl ChannelBuffer for NoBuffer {
     }
 
     fn iterator(&self, _: &ChannelID) -> Option<Box<BufferIterator>> {
+        todo!()
+    }
+
+    fn wait_for_data(&self, _: Duration) -> Result<bool, ChannelError> {
         todo!()
     }
 }

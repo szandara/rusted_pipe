@@ -89,6 +89,14 @@ pub trait ChannelBuffer {
     /// * Arguments
     /// `timeout` - How long to wait for the data.
     fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>;
+    /// Waits for timeout for any channel to have data. 
+    ///
+    /// * Arguments
+    /// `timeout` - How long to wait for the data.
+    /// 
+    /// * Returns
+    /// true if there is dat a in any channel before timeout.
+    fn wait_for_data(&self, timeout: Duration) -> Result<bool, ChannelError>;
 }
 
 /// A trait for generating packet set from an existing ReadChannel.
@@ -134,12 +142,29 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
         let data;
 
         {
-            let mut locked = self
+            let read_locked = self
+                .channels
+                .read()
+                .unwrap_or_else(PoisonError::into_inner);
+            let has_data =  read_locked.wait_for_data(Duration::from_millis(50));
+            if let Err(err) = has_data {
+                eprintln!("Error while waiting for data {err} on channel {node_id}.");
+                return None;
+            }
+            if let Ok(data) = has_data {
+                if !data {
+                    return None;
+                }
+            }
+        }
+
+        {
+            let mut write_locked = self
                 .channels
                 .write()
                 .unwrap_or_else(PoisonError::into_inner);
-            let result =  locked.try_receive(Duration::from_millis(100));
-            
+            let result = write_locked.try_receive(Duration::from_micros(50));
+        
             data = match result {
                 Ok(has_data) => {
                     has_data.cloned()
@@ -148,7 +173,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                     eprintln!("Node {node_id}: Exception while reading {err:?}");
                     match err {
                         crate::channels::ChannelError::ReceiveError(_) => {
-                            if locked.are_buffers_empty() {
+                            if write_locked.are_buffers_empty() {
                                 let _ = done_notification.send(node_id);
                             }
                             eprintln!("Channel is disonnected, closing");
@@ -156,8 +181,8 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                             return None;
                         }
                         _ => {
-                            debug!("Sending done {node_id}");
-                            if locked.are_buffers_empty() {
+                            if write_locked.are_buffers_empty() {
+                                debug!("Sending done {node_id}");
                                 let _ = done_notification.send(node_id);
                             }
                             None
@@ -166,10 +191,12 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                 }
             };
         }
+        
+        
 
         if data.is_some() {
             self.synchronize()
-        }
+        } 
         data
     }
 

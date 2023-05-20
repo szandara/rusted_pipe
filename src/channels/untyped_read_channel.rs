@@ -10,6 +10,7 @@
 //! It's possible to add a new channel at any time before the graph is created and
 //! started.
 use std::collections::HashMap;
+use std::time::Duration;
 
 use super::read_channel::get_data;
 use super::read_channel::BufferReceiver;
@@ -40,8 +41,6 @@ unsafe impl Send for UntypedReadChannel {}
 pub struct UntypedReadChannel {
     // Map of channels. Channels are stored as string keys.
     buffered_data: IndexMap<ChannelID, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
-    // List of connected channels. Internally used.
-    connected_channels: Vec<ChannelID>,
 }
 
 impl Default for UntypedReadChannel {
@@ -49,7 +48,6 @@ impl Default for UntypedReadChannel {
     fn default() -> Self {
         UntypedReadChannel {
             buffered_data: Default::default(),
-            connected_channels: vec![],
         }
     }
 }
@@ -62,7 +60,6 @@ impl UntypedReadChannel {
     ) -> Self {
         UntypedReadChannel {
             buffered_data,
-            connected_channels: vec![],
         }
     }
 
@@ -91,6 +88,22 @@ impl UntypedReadChannel {
         channel: &ChannelID,
     ) -> Option<&mut BufferReceiver<RtRingBuffer<Box<Untyped>>>> {
         self.buffered_data.get_mut(channel)
+    }
+    
+    fn _wait_for_data(&self, timeout: Duration) -> Option<&ChannelID> {
+        let mut select = Select::new();
+        let mut connected_channels = vec![]; 
+        for (id, rec) in &self.buffered_data {
+            if let Some(channel) = rec.channel.as_ref() {
+                connected_channels.push(id);
+                select.recv(&channel.receiver);
+            }
+        }
+
+        if let Ok(channel) = select.ready_timeout(timeout) {
+            return connected_channels.get(channel).copied()
+        }
+        None
     }
 }
 
@@ -125,25 +138,15 @@ impl ChannelBuffer for UntypedReadChannel {
     }
 
     fn try_receive(&mut self, timeout: std::time::Duration) -> Result<Option<&ChannelID>, ChannelError> {
-        let mut select = Select::new();
-        for (id, rec) in &self.buffered_data {
-            if let Some(channel) = rec.channel.as_ref() {
-                self.connected_channels.push(id.clone());
-                select.recv(&channel.receiver);
-            }
-        }
+        if let Some(ch) = self._wait_for_data(timeout).cloned() {
+            if let Some((_, channel, buffer)) = self.buffered_data.get_full_mut(&ch) {
+                let msg = buffer.channel.as_ref()
+                .expect("Buffer has not receiver channel. This is a bug")
+                .receiver
+                .recv()?;
 
-        if let Ok(channel) = select.ready_timeout(timeout) {
-            if let Some(ch) = self.connected_channels.get(channel) {
-                if let Some(buffer) = self.buffered_data.get_mut(ch) {
-                    let msg = buffer.channel.as_ref()
-                    .expect("Buffer has not receiver channel. This is a bug")
-                    .receiver
-                    .recv()?;
-
-                    buffer.buffer.insert(msg)?;
-                return Ok(Some(ch));
-                }
+                buffer.buffer.insert(msg)?;
+                return Ok(Some(channel));
             }
         }
         Ok(None)
@@ -164,6 +167,10 @@ impl ChannelBuffer for UntypedReadChannel {
             }
         }
         min
+    }
+
+    fn wait_for_data(&self, _timeout: std::time::Duration) -> Result<bool, ChannelError> {
+        todo!()
     }
 }
 

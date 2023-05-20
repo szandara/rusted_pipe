@@ -19,7 +19,6 @@ impl<U: Clone + 'static> Default for BufferWriter<U> {
 }
 
 impl<U: Clone + 'static> BufferWriter<U> {
-    
     pub fn link(&mut self, sender: SenderChannel<U>) {
         self.channels.push(sender);
     }
