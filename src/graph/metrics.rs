@@ -162,7 +162,7 @@ pub fn spawn_metrics_server(prometheus_addr: &str) -> MetricsServer {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct BufferMonitor {
     metrics: Option<GenericGauge<prometheus::core::AtomicI64>>
 }

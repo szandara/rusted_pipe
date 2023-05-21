@@ -71,7 +71,7 @@ pub trait ChannelBuffer {
     /// `version` - The data version to find.
     fn has_version(&self, channel: &ChannelID, version: &DataVersion) -> bool;
     /// Gets the minimum version over all channels.
-    fn min_version(&self) -> Option<&DataVersion>;
+    fn max_version(&self) -> Option<&DataVersion>;
     /// Returns a reference of the head of the buffer in `channel`.
     ///
     /// * Arguments
@@ -128,8 +128,6 @@ pub struct ReadChannel<T: InputGenerator + ChannelBuffer + Send> {
     pub work_queue: Option<WorkQueue<T::INPUT>>,
     /// A reference to the channels of the ReadChannel.
     pub channels: Arc<RwLock<T>>,
-    /// A monitor for upcoming work.
-    pub work_monitor: BufferMonitor,
 }
 
 unsafe impl<T: InputGenerator + ChannelBuffer + Send> Sync for ReadChannel<T> {}
@@ -217,7 +215,6 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
             synch_strategy,
             work_queue,
             channels: Arc::new(RwLock::new(channels)),
-            work_monitor: BufferMonitor::default()
         }
     }
 
@@ -239,7 +236,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
             BufferMonitor::default()
         };
 
-        let work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size));
+        let work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size, work_monitor));
     
         let channels = T::create_channels(channel_buffer_size, block_channel_full, monitor_builder);
 
@@ -247,19 +244,17 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
             synch_strategy,
             work_queue,
             channels: Arc::new(RwLock::new(channels)),
-            work_monitor
         }
     }
 
     pub fn synchronize(&mut self) {
-        if let Some(queue) = self.work_queue.as_ref() {
+        if let Some(queue) = self.work_queue.as_mut() {
             let synch = self.synch_strategy.synchronize(self.channels.clone());
             if let Some(sync) = synch {
                 let mut channels = if let Ok(channels) = self.channels.write() {channels} else {return;};
                     
                 if let Some(value) = channels.get_packets_for_version(&sync, false) {
                     queue.push(value);
-                    self.work_monitor.inc();
                 }
             }
         }

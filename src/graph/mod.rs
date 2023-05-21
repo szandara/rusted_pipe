@@ -378,7 +378,7 @@ mod tests {
             max_packets,
         );
 
-        let (graph, output_check) = setup_default_test(node0, node1, 100, WorkQueue::new(1));
+        let (graph, output_check) = setup_default_test(node0, node1, 100, WorkQueue::new(1, BufferMonitor::default()));
 
         let mut results = Vec::with_capacity(max_packets);
         let deadline = Instant::now() + Duration::from_millis(collection_time_ms);

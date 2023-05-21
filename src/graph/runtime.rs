@@ -1,6 +1,6 @@
 use super::{
     build::{ProcessorWorker, WorkerStatus},
-    metrics::{ProfilerTag, BufferMonitorBuilder, BufferMonitor},
+    metrics::{ProfilerTag},
     processor::{Processors},
 };
 use crate::{channels::{read_channel::ReadChannel, typed_write_channel::TypedWriteChannel}, packet::work_queue::WorkQueue};
@@ -63,7 +63,6 @@ where
     done_notification: Sender<String>,
     thread_pool: ThreadPool,
     metrics_timer: Histogram,
-    work_metrics: BufferMonitor,
     profiler: Arc<ProfilerTag>,
     shared_writer: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
     shared_processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
@@ -86,7 +85,6 @@ where
         profiler: ProfilerTag,
     ) -> Self {
         let metrics_timer = METRICS_TIMER.with_label_values(&[&id]);
-        let work_metrics = BufferMonitorBuilder::new(&id).make_channel("_work_consumer");
         
         let mut shared_writer = None;
         if let Some(channel) = worker.write_channel {
@@ -103,7 +101,6 @@ where
             done_notification,
             thread_pool,
             metrics_timer,
-            work_metrics,
             profiler: Arc::new(profiler),
             shared_writer,
             shared_processor,
@@ -119,11 +116,10 @@ where
                 let lock_status = self.status.clone();
 
                 let mut packet = None;
-                if let Some(work_queue) = self.work_queue.as_ref() {
+                if let Some(work_queue) = self.work_queue.as_mut() {
                     let task = work_queue.get(Some(Duration::from_millis(100)));
                     if let Ok(read_event) = task {
                         packet = Some(read_event.packet_data);
-                        self.work_metrics.inc();
                     } else {
                         if self.running.load(Ordering::Relaxed)
                             == GraphStatus::WaitingForDataToTerminate

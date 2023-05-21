@@ -53,7 +53,7 @@ pub trait FixedSizeBuffer: LenTrait {
     fn insert(&mut self, packet: Packet<Self::Data>) -> Result<(), BufferError>;
     /// Peek the head of the buffer, oldest entry in the buffer.
     fn peek(&self) -> Option<&DataVersion>;
-    /// Gets an iterator to the data.
+    /// Gets an iterator to the data starting from the end.
     fn iter(&self) -> Box<BufferIterator>;
     /// Removes the head of the buffer, oldest entry in the buffer.
     fn pop(&mut self) -> Option<Packet<Self::Data>>;
@@ -126,8 +126,12 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
 
     fn insert(&mut self, packet: Packet<T>) -> Result<(), BufferError> {
         self.check_order(packet.version.timestamp_ns)?;
-        if self.block_full && self.buffer.is_full() {
-            return Err(BufferError::BufferFull);
+        if self.buffer.is_full() {
+            if self.block_full {
+                return Err(BufferError::BufferFull);
+            } else {
+                self.monitor.dec();
+            }
         }
         self.monitor.inc();
         self.buffer.push(packet);
@@ -222,6 +226,7 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
                 return Err(BufferError::BufferFull);
             }
             self.data.pop_first();
+            self.monitor.dec();
         }
         self.data.insert(packet.version, packet);
         self.monitor.inc();
