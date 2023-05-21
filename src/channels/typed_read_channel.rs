@@ -113,24 +113,11 @@ macro_rules! read_channels {
                 None
             }
 
-            fn min_version(&self) -> Option<&DataVersion> {
+            fn max_version(&self) -> Option<&DataVersion> {
                 let vals = [$(
-                    self.$T.receiver.buffer.peek(),
+                    self.$T.receiver.buffer.back(),
                 )+];
-                let mut min = None;
-                for val in vals {
-                    if min.is_none() && val.is_some() {
-                        min = val;
-                        continue;
-                    }
-                    if let Some(val) = val {
-                        // Safe to unwrap here
-                        if val.timestamp_ns < min.unwrap_or(val).timestamp_ns  {
-                            min = Some(val);
-                        }
-                    }
-                }
-                return min;
+                vals.iter().filter_map(|b| *b).max()
             }
         }
 
@@ -224,7 +211,7 @@ impl ChannelBuffer for NoBuffer {
         todo!()
     }
 
-    fn min_version(&self) -> Option<&DataVersion> {
+    fn max_version(&self) -> Option<&DataVersion> {
         todo!();
     }
 

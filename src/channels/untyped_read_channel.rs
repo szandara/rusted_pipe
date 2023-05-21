@@ -152,21 +152,8 @@ impl ChannelBuffer for UntypedReadChannel {
         Ok(None)
     }
 
-    fn min_version(&self) -> Option<&DataVersion> {
-        let mut min = None;
-        for buffer in self.buffered_data.values() {
-            let val = buffer.buffer.peek();
-            if min.is_none() {
-                min = val;
-                continue;
-            }
-            if let Some(val) = val {
-                if val.timestamp_ns < min.unwrap().timestamp_ns {
-                    min = Some(val);
-                }
-            }
-        }
-        min
+    fn max_version(&self) -> Option<&DataVersion> {
+        self.buffered_data.values().filter_map(|b|  b.buffer.back()).max()
     }
 
     fn wait_for_data(&self, _timeout: std::time::Duration) -> Result<bool, ChannelError> {

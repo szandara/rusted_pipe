@@ -52,6 +52,8 @@ pub trait FixedSizeBuffer: LenTrait {
     /// Ok if the data could be inserted or error in opposite case.
     fn insert(&mut self, packet: Packet<Self::Data>) -> Result<(), BufferError>;
     /// Peek the head of the buffer, oldest entry in the buffer.
+    fn back(&self) -> Option<&DataVersion>;
+    /// Peek the head of the buffer, oldest entry in the buffer.
     fn peek(&self) -> Option<&DataVersion>;
     /// Gets an iterator to the data starting from the end.
     fn iter(&self) -> Box<BufferIterator>;
@@ -145,6 +147,13 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
         None
     }
 
+    fn back(&self) -> Option<&DataVersion> {
+        if let Some(peek) = self.buffer.back() {
+            return Some(&peek.version);
+        }
+        None
+    }
+
     fn pop(&mut self) -> Option<Packet<T>> {
         let packet = self.buffer.dequeue();
         if packet.is_some() {
@@ -154,7 +163,7 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
     }
 
     fn iter(&self) -> Box<BufferIterator> {
-        Box::new(self.buffer.iter().map(|p| &p.version)) as Box<BufferIterator>
+        Box::new(self.buffer.iter().rev().map(|p| &p.version)) as Box<BufferIterator>
     }
 }
 
@@ -240,6 +249,13 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
         }
     }
 
+    fn back(&self) -> Option<&DataVersion> {
+        match self.data.last_key_value() {
+            Some(data) => Some(data.0),
+            None => None,
+        }
+    }
+
     fn pop(&mut self) -> Option<Packet<T>> {
         if let Some(value) = self.data.pop_first() {
             self.monitor.dec();
@@ -249,7 +265,7 @@ impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {
     }
 
     fn iter(&self) -> Box<BufferIterator> {
-        Box::new(self.data.values().map(|p| &p.version)) as Box<BufferIterator>
+        Box::new(self.data.values().rev().map(|p| &p.version)) as Box<BufferIterator>
     }
 }
 
