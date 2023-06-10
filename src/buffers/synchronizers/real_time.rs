@@ -178,10 +178,8 @@ fn find_common_max(
         }
 
         let matches = extract_matches(&buffers_tolerance, wait_all);
-        println!("Matches in {:?}: {:?} for {:?}", buffers_tolerance, matches, target);
         // Decide if we want to try a new target. The previous target did not produce any match.
         if matches.is_none() || wait_all && matches.as_ref().unwrap().contains(&None) {
-            println!("New targets {:?}", new_targets);
             if let Some(nt) = new_targets.pop() {
                 
                 target = nt.0;
@@ -193,7 +191,6 @@ fn find_common_max(
             } else {
                 return None;
             }
-            println!("New target {:?}", target);
             continue;
         }
         return matches;
