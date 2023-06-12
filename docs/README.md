@@ -1,5 +1,9 @@
 # Rusted Pipe
 
+## Overview
+
+<img src="rusted.png" width="700">
+
 ## Key Concepts
 
 ### Processor
