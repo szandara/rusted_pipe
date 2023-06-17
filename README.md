@@ -32,7 +32,6 @@ Rusted Pipe already offers common syncrhonization strategies but also allows use
 - RealTimeSynchronizer: This synchronizer is more suited for real time computations. It deals with potential data loss from slow consumers dropping packets. There are three main variables to control the behavior depending on the user.
   - `wait_all`: Only outputs tuple if all buffers in the channel have a match. If false, processors might be called with only some of their read channel data. Processors should take into account lack of data.
   - `tolerance_ns`: Nano seconds of tolerance when matching tuples. 0 tolerance will only match exact versions.
-  - `buffering`: Useful when dealing with slow consumers. It buffers data until all consumers have full tuple match and then continues processing. If out of sync is detected, it re-buffers.
 
 To explain a bit better the problem of synchronization, let's take the graph explained above. Since all consumers produce data at different times, it's not trivial to make sure that all data is processed in a meaningful way. 
 
@@ -44,9 +43,9 @@ In this example there are 4 nodes running at different speed (on an M1 Apple CPU
 - A result renderer thath collects video images and inference results and generates an output.
 
 
-| TimestampSychronizer (offline)      | RealTimeSynchronizer with buffering | RealTimeSynchronizer with wait_all |
-| ----------- | ----------- | ----------- |
-|<img src="docs/synced.gif" width="249" height="190"> | <img src="docs/buffered.gif" width="249" height="190"> | <img src="docs/wait_realtime.gif" width="249" height="190"> |
+| TimestampSychronizer (offline)      | RealTimeSynchronizer
+| ----------- | ----------- |
+|<img src="docs/synced.gif" width="249" height="190"> | <img src="docs/buffered.gif" width="249" height="190"> |
 
 ## Motivations
 
@@ -75,5 +74,8 @@ Gstreamer is not a direct competitor of Rusted Pipe but it's often mentioned as 
 
 See [docs/README.md](docs/README.md)
 
-## Contributing code
-Send pull requests against the client packages in the Kubernetes main [repository](https://github.com/szandara/rustedpipe). 
+## Contributing
+- Clone the package
+- Branch off for your MR
+- Run the tests
+- Send pull requests against  [repository](https://github.com/szandara/rustedpipe). 
