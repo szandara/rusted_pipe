@@ -55,7 +55,7 @@ Rusted pipe is integrated with prometheus metrics and a profiler. Both instrumen
 
 By default RustedPipe offers metrics at `http://localhost:9001/metrics`, this can be changed by configuring the Graph instruments.
 
-Below it uses the default Prometheus address, pass your constructed Prometheus url to change the port.
+Pass your constructed Prometheus url to change the port.
 ```
 let metrics = Metrics::builder().with_prometheus(&default_prometheus_address());
 let mut graph = Graph::new(metrics);
@@ -75,7 +75,7 @@ By default Rusted Pipe comes with a Pyroscope profiler which (contrarily from Pr
 
 Note that activating the profiler will add a certain overhead to your computation and should only be used for development.
 
-In the code snippet below we start a graph with a profiler activated.
+In the code snippet below, we start a graph with a profiler activated.
 
 ```
 let metrics = Metrics::builder().with_pyroscope(&default_pyroscope_address());
