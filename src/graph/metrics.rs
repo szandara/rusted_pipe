@@ -15,7 +15,7 @@ lazy_static! {
 }
 
 pub const MACOS_DOCKER_ADDRESS: &str = "host.docker.internal";
-pub const LOCALHOST: &str = "127.0.0.1";
+pub const LOCALHOST: &str = "localhost";
 
 pub struct Profiler {
     pub profiler: PyroscopeAgent<PyroscopeAgentRunning>,
@@ -65,7 +65,7 @@ pub fn default_prometheus_address() -> String {
 
 /// Default pyroscope server address
 pub fn default_pyroscope_address() -> String {
-    format!("{LOCALHOST}:4040")
+    format!("http://{LOCALHOST}:4040")
 }
 
 pub struct Metrics {

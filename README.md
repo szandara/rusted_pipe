@@ -12,7 +12,7 @@ An example graph could be a pipeline for reading car plates in a vidoe feed, whi
 Car detector and OCR can run in parallel as they work on the data independently but they produce at different speed. We can also run the sequential but the overall throughput would be slower.
 Finally the result could look like this depending on the synchronization strategy (more on this below).
 
-<img src="docs/synced.gif" width="500" height="320">
+<img src="docs/offline.gif" width="500" height="320">
 
 # What is it not?
 Rusted pipe is not a data processing tool and does not solve other parallelism problems such as data parallelism. For that there are already powerful tools such as [Rayon](https://github.com/rayon-rs/rayon). In fact `Rayon` ca be used inside calculators. Similarly this tool is not a competitor of GStreamer. In the examples you will see how to integrate GStreamer with RustedPipe.
@@ -39,13 +39,53 @@ In this example there are 4 nodes running at different speed (on an M1 Apple CPU
 
 - A video producer running at 25 fps.
 - A car deep learning model running at ~0.5 fps.
-- An OCR tesseract model running at ~1 fps.
+- An OCR tesseract model running at ~0.6 fps.
 - A result renderer thath collects video images and inference results and generates an output.
 
 
-| TimestampSychronizer (offline)      | RealTimeSynchronizer
+| TimestampSychronizer (offline)      | RealTimeSynchronizer (~1 FPS)
 | ----------- | ----------- |
-|<img src="docs/synced.gif" width="249" height="190"> | <img src="docs/buffered.gif" width="249" height="190"> |
+|<img src="docs/offline.gif" width="249" height="190"> | <img src="docs/online.gif" width="249" height="190"> |
+
+## Observability
+
+Rusted pipe is integrated with prometheus metrics and a profiler. Both instruments can be turned on and off for performances. Metrics are by default turned on on each Node. Profiling needs to be explicitely turned on.
+
+### Metrics
+
+By default RustedPipe offers metrics at `http://localhost:9001/metrics`, this can be changed by configuring the Graph instruments.
+
+Below it uses the default Prometheus address, pass your constructed Prometheus url to change the port.
+```
+let metrics = Metrics::builder().with_prometheus(&default_prometheus_address());
+let mut graph = Graph::new(metrics);
+```
+
+The default metrics are:
+- Queue sizes: number of elements in each Node queue, useful to monitor how your pipeline is behaving. Growing queues are usually a symptom of a suboptimal graph setup.
+- Processing time: provides an end to end processing time but also the processing time of each node. Useful to understand where to optimize your queue.
+
+In order to consume these metrics you need to have Prometheus running and a visualizer like Grafana. The final result would be as below. To configure Grafana and Prometheus please follow one of the many online guides.
+
+<img src="docs/rusted_queue.png">
+
+### Profiler
+
+By default Rusted Pipe comes with a Pyroscope profiler which (contrarily from Prometheus) is set in push mode. If activated Pyroscope will send metrics each 10 seconds to a Pyroscope server. To create that endpoint please install Pyroscope in your system or remotely and configure the Graph to send metrics there.
+
+Note that activating the profiler will add a certain overhead to your computation and should only be used for development.
+
+In the code snippet below we start a graph with a profiler activated.
+
+```
+let metrics = Metrics::builder().with_pyroscope(&default_pyroscope_address());
+let mut graph = Graph::new(metrics);
+```
+
+Each node will create a tag with its id and will help profiling the node computation time.
+
+
+<img src="docs/rusted_profiler.png">
 
 ## Motivations
 

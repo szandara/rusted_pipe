@@ -110,7 +110,6 @@ where
     }
 
     pub(super) fn consume(&mut self) {
-        self.profiler.add("consumer".to_string(), self.id.clone());
         while self.running.load(Ordering::Relaxed) != GraphStatus::Terminating {
             if self.status.load(Ordering::Relaxed) == WorkerStatus::Idle {
                 let lock_status = self.status.clone();
@@ -134,12 +133,14 @@ where
                 self.status.store(WorkerStatus::Running, Ordering::Relaxed);
 
                 let processor_clone = self.shared_processor.clone();
+                let profiler_clone = self.profiler.clone();
                 let id_thread = self.id.clone();
                 let arc_write_channel = self.shared_writer.clone();
                 let done_clone = self.done_notification.clone();
                 let metrics_clone = self.metrics_timer.clone();
 
                 let future = move || {
+                    profiler_clone.add("consumer".to_string(), id_thread.clone());
                     let timer = metrics_clone.start_timer();
                     let result = match &mut *processor_clone.lock().unwrap_or_else(PoisonError::into_inner) {
                         Processors::Processor(proc) => {
@@ -169,6 +170,9 @@ where
                             proc.handle(write_channel)
                         }
                     };
+                    
+                    profiler_clone
+                        .remove("consumer".to_string(), id_thread.clone());
                     timer.observe_duration();
                     match result {
                         Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
@@ -198,9 +202,8 @@ where
                    let _ = self.done_notification.send(self.id.clone());
                 }
             }
+            
         }
-        self.profiler
-            .remove("consumer".to_string(), self.id.clone());
         println!("Worker {} exited", self.id);
     }
 }
