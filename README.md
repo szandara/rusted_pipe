@@ -38,12 +38,12 @@ To explain a bit better the problem of synchronization, let's take the graph exp
 In this example there are 4 nodes running at different speed (on an M1 Apple CPU). This is an artifically bad case since consumers should strive for being fast to keep up with realtime. However, it explains how data is synched.
 
 - A video producer running at 25 fps.
-- A car deep learning model running at ~0.5 fps.
-- An OCR tesseract model running at ~0.6 fps.
+- A car deep learning model running at 2 fps.
+- An OCR tesseract model running at ~1.2 fps.
 - A result renderer thath collects video images and inference results and generates an output.
 
 
-| TimestampSychronizer (offline)      | RealTimeSynchronizer (~1 FPS)
+| TimestampSychronizer (offline)      | RealTimeSynchronizer (~1.2 FPS overall)
 | ----------- | ----------- |
 |<img src="docs/offline.gif" width="249" height="190"> | <img src="docs/online.gif" width="249" height="190"> |
 
