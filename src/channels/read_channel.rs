@@ -3,7 +3,7 @@
 //! allocate space for the incoming data and synchronize that data using the
 //! user configured syncrhonizer.
 use std::{
-    sync::{Arc, RwLock, PoisonError},
+    sync::{Arc, PoisonError, RwLock},
     thread,
     time::Duration,
 };
@@ -12,8 +12,9 @@ use crossbeam::channel::Sender;
 use log::debug;
 
 use crate::{
-    buffers::{single_buffers::{RtRingBuffer}, synchronizers::PacketSynchronizer},
-    packet::work_queue::WorkQueue, graph::metrics::{BufferMonitorBuilder, BufferMonitor}
+    buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
+    graph::metrics::{BufferMonitor, BufferMonitorBuilder},
+    packet::work_queue::WorkQueue,
 };
 
 use std::collections::HashMap;
@@ -89,11 +90,11 @@ pub trait ChannelBuffer {
     /// * Arguments
     /// `timeout` - How long to wait for the data.
     fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>;
-    /// Waits for timeout for any channel to have data. 
+    /// Waits for timeout for any channel to have data.
     ///
     /// * Arguments
     /// `timeout` - How long to wait for the data.
-    /// 
+    ///
     /// * Returns
     /// true if there is dat a in any channel before timeout.
     fn wait_for_data(&self, timeout: Duration) -> Result<bool, ChannelError>;
@@ -116,7 +117,11 @@ pub trait InputGenerator {
         exact_match: bool,
     ) -> Option<Self::INPUT>;
 
-    fn create_channels(buffer_size: usize, block_on_full: bool, monitor: BufferMonitorBuilder) -> Self;
+    fn create_channels(
+        buffer_size: usize,
+        block_on_full: bool,
+        monitor: BufferMonitorBuilder,
+    ) -> Self;
 }
 
 /// A generic ReadChannel that holds a reference to a struct that has
@@ -142,11 +147,8 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
         let data;
 
         {
-            let read_locked = self
-                .channels
-                .read()
-                .unwrap_or_else(PoisonError::into_inner);
-            let has_data =  read_locked.wait_for_data(Duration::from_millis(50));
+            let read_locked = self.channels.read().unwrap_or_else(PoisonError::into_inner);
+            let has_data = read_locked.wait_for_data(Duration::from_millis(50));
             if let Err(err) = has_data {
                 eprintln!("Error while waiting for data {err} on channel {node_id}.");
                 return None;
@@ -164,11 +166,9 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                 .write()
                 .unwrap_or_else(PoisonError::into_inner);
             let result = write_locked.try_receive(Duration::from_micros(50));
-        
+
             data = match result {
-                Ok(has_data) => {
-                    has_data.cloned()
-                },
+                Ok(has_data) => has_data.cloned(),
                 Err(err) => {
                     eprintln!("Node {node_id}: Exception while reading {err:?}");
                     match err {
@@ -191,12 +191,10 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                 }
             };
         }
-        
-        
 
         if data.is_some() {
             self.synchronize()
-        } 
+        }
         data
     }
 
@@ -217,7 +215,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
             synch_strategy,
             work_queue,
             channels: Arc::new(RwLock::new(channels)),
-            work_monitor: BufferMonitor::default()
+            work_monitor: BufferMonitor::default(),
         }
     }
 
@@ -227,27 +225,27 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         channel_buffer_size: usize,
         process_buffer_size: usize,
         synch_strategy: Box<dyn PacketSynchronizer>,
-        monitor: bool
+        monitor: bool,
     ) -> Self {
         let mut monitor_builder = BufferMonitorBuilder::no_monitor();
         if monitor {
             monitor_builder = BufferMonitorBuilder::new(id);
         }
-        let work_monitor= if monitor {
+        let work_monitor = if monitor {
             monitor_builder.make_channel("_work_queue")
         } else {
             BufferMonitor::default()
         };
 
         let work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size));
-    
+
         let channels = T::create_channels(channel_buffer_size, block_channel_full, monitor_builder);
 
         Self {
             synch_strategy,
             work_queue,
             channels: Arc::new(RwLock::new(channels)),
-            work_monitor
+            work_monitor,
         }
     }
 
@@ -255,8 +253,12 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         if let Some(queue) = self.work_queue.as_ref() {
             let synch = self.synch_strategy.synchronize(self.channels.clone());
             if let Some(sync) = synch {
-                let mut channels = if let Ok(channels) = self.channels.write() {channels} else {return;};
-                    
+                let mut channels = if let Ok(channels) = self.channels.write() {
+                    channels
+                } else {
+                    return;
+                };
+
                 if let Some(value) = channels.get_packets_for_version(&sync, false) {
                     queue.push(value);
                     self.work_monitor.inc();

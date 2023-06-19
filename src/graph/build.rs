@@ -105,7 +105,6 @@ impl Graph {
                             reading_running_thread,
                             read_channel,
                             done_channel,
-                            
                         )
                     }),
                 );
@@ -199,30 +198,32 @@ impl Graph {
         let thread_clone = self.pool.clone();
         let id_move = node_id.clone();
 
-        let profiler: Option<_> = self.metrics.profiler().as_ref().map(|profiler| profiler.profiler.tag_wrapper());
+        let profiler: Option<_> = self
+            .metrics
+            .profiler()
+            .as_ref()
+            .map(|profiler| profiler.profiler.tag_wrapper());
 
-        let existing = self
-            .node_threads
-            .insert(
-                node_id.clone(),
-                thread::spawn(move || {
-                    let profiler_tag = match profiler {
-                        Some(taggers) => ProfilerTag::from_tuple(taggers),
-                        None => ProfilerTag::no_profiler(),
-                    };
+        let existing = self.node_threads.insert(
+            node_id.clone(),
+            thread::spawn(move || {
+                let profiler_tag = match profiler {
+                    Some(taggers) => ProfilerTag::from_tuple(taggers),
+                    None => ProfilerTag::no_profiler(),
+                };
 
-                    let mut consumer = ConsumerThread::new(
-                        id_move,
-                        consume_running_thread,
-                        wait_clone,
-                        worker,
-                        done_channel,
-                        thread_clone,
-                        profiler_tag,
-                    );
-                    consumer.consume();
-                }),
-            );
+                let mut consumer = ConsumerThread::new(
+                    id_move,
+                    consume_running_thread,
+                    wait_clone,
+                    worker,
+                    done_channel,
+                    thread_clone,
+                    profiler_tag,
+                );
+                consumer.consume();
+            }),
+        );
         if existing.is_some() {
             panic!("Node {node_id} already started!");
         }
@@ -251,7 +252,9 @@ impl Graph {
                     self.node_threads.len()
                 );
                 if let Some(duration) = timeout {
-                    let done = self.worker_done.1.recv_timeout(duration).expect("Waiting for consumer nodes: Did not receive all done messages on time");
+                    let done = self.worker_done.1.recv_timeout(duration).expect(
+                        "Waiting for consumer nodes: Did not receive all done messages on time",
+                    );
                     empty_set.insert(done);
                 } else {
                     let done = self.worker_done.1.recv().expect("Waiting for consumer nodes: Synchronization channels have been closed. Terminating graph without waiting.");
@@ -269,7 +272,9 @@ impl Graph {
                     self.read_threads.len()
                 );
                 if let Some(duration) = timeout {
-                    let done = self.reader_empty.1.recv_timeout(duration).expect("Waiting for reader nodes: Did not receive all done messages on time");
+                    let done = self.reader_empty.1.recv_timeout(duration).expect(
+                        "Waiting for reader nodes: Did not receive all done messages on time",
+                    );
                     empty_receiver_set.insert(done);
                 } else {
                     let done = self.reader_empty.1.recv().expect("Waiting for reader nodes: Synchronization channels have been closed. Terminating graph without waiting.");
@@ -280,17 +285,24 @@ impl Graph {
         self.running
             .swap(GraphStatus::Terminating, Ordering::Relaxed);
 
-        
         let keys = self.node_threads.keys().cloned().collect_vec();
         for id in keys {
             println!("Waiting for node {id} to stop");
-            self.node_threads.remove(&id).expect("Thread ID not found").join().unwrap_or_else(|_| panic!("Cannot join thread {id}"));
+            self.node_threads
+                .remove(&id)
+                .expect("Thread ID not found")
+                .join()
+                .unwrap_or_else(|_| panic!("Cannot join thread {id}"));
         }
 
         let keys = self.read_threads.keys().cloned().collect_vec();
         for id in keys {
             println!("Waiting for reader {id} to stop");
-            self.read_threads.remove(&id).expect("Thread ID not found").join().unwrap_or_else(|_| panic!("Cannot join thread {id}"));
+            self.read_threads
+                .remove(&id)
+                .expect("Thread ID not found")
+                .join()
+                .unwrap_or_else(|_| panic!("Cannot join thread {id}"));
         }
         println!("Waiting for metrics to stop");
         self.metrics.stop();

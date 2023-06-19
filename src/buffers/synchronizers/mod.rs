@@ -49,7 +49,11 @@ fn get_min_versions<'a>(
     buffer: Arc<RwLock<dyn ChannelBuffer + 'a>>,
 ) -> HashMap<ChannelID, Option<DataVersion>> {
     let mut out_map = HashMap::<ChannelID, Option<DataVersion>>::default();
-    let buffer = if let Ok(data) = buffer.read() {data} else {return out_map;};
+    let buffer = if let Ok(data) = buffer.read() {
+        data
+    } else {
+        return out_map;
+    };
 
     for channel in buffer.available_channels().iter() {
         out_map.insert(ChannelID::from(channel), buffer.peek(channel).cloned());
@@ -72,7 +76,8 @@ pub mod tests {
             synchronizers::exact_synchronize,
         },
         channels::{typed_read_channel::ReadChannel3, ChannelID, Packet},
-        DataVersion, graph::metrics::BufferMonitor,
+        graph::metrics::BufferMonitor,
+        DataVersion,
     };
 
     pub fn create_test_buffer() -> ReadChannel3<String, String, String> {
@@ -116,29 +121,11 @@ pub mod tests {
             },
         };
         if channel_id == "c1" {
-            buffer
-                .write()
-                .unwrap()
-                .c1()
-                .buffer
-                .insert(packet)
-                .unwrap();
+            buffer.write().unwrap().c1().buffer.insert(packet).unwrap();
         } else if channel_id == "c2" {
-            buffer
-                .write()
-                .unwrap()
-                .c2()
-                .buffer
-                .insert(packet)
-                .unwrap();
+            buffer.write().unwrap().c2().buffer.insert(packet).unwrap();
         } else if channel_id == "c3" {
-            buffer
-                .write()
-                .unwrap()
-                .c3()
-                .buffer
-                .insert(packet)
-                .unwrap();
+            buffer.write().unwrap().c3().buffer.insert(packet).unwrap();
         }
     }
 

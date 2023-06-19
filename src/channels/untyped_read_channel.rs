@@ -16,11 +16,11 @@ use super::read_channel::get_data;
 use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
-use crate::buffers::single_buffers::LenTrait;
-use crate::graph::metrics::BufferMonitorBuilder;
 use super::ChannelError;
 use super::ChannelID;
 use super::UntypedPacket;
+use crate::buffers::single_buffers::LenTrait;
+use crate::graph::metrics::BufferMonitorBuilder;
 
 use crate::buffers::single_buffers::FixedSizeBuffer;
 use crate::buffers::single_buffers::RtRingBuffer;
@@ -53,14 +53,11 @@ impl Default for UntypedReadChannel {
 }
 
 impl UntypedReadChannel {
-    
     /// A pre-initialized UntypedReadChannel.
     pub fn new(
         buffered_data: IndexMap<ChannelID, BufferReceiver<RtRingBuffer<Box<Untyped>>>>,
     ) -> Self {
-        UntypedReadChannel {
-            buffered_data,
-        }
+        UntypedReadChannel { buffered_data }
     }
 
     /// Add a named channel and its corresponding buffer. The buffer
@@ -89,10 +86,10 @@ impl UntypedReadChannel {
     ) -> Option<&mut BufferReceiver<RtRingBuffer<Box<Untyped>>>> {
         self.buffered_data.get_mut(channel)
     }
-    
+
     fn _wait_for_data(&self, timeout: Duration) -> Option<&ChannelID> {
         let mut select = Select::new();
-        let mut connected_channels = vec![]; 
+        let mut connected_channels = vec![];
         for (id, rec) in &self.buffered_data {
             if let Some(channel) = rec.channel.as_ref() {
                 connected_channels.push(id);
@@ -101,7 +98,7 @@ impl UntypedReadChannel {
         }
 
         if let Ok(channel) = select.ready_timeout(timeout) {
-            return connected_channels.get(channel).copied()
+            return connected_channels.get(channel).copied();
         }
         None
     }
@@ -137,13 +134,18 @@ impl ChannelBuffer for UntypedReadChannel {
         self.buffered_data.values().all(|b| b.buffer.len() == 0)
     }
 
-    fn try_receive(&mut self, timeout: std::time::Duration) -> Result<Option<&ChannelID>, ChannelError> {
+    fn try_receive(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<Option<&ChannelID>, ChannelError> {
         if let Some(ch) = self._wait_for_data(timeout).cloned() {
             if let Some((_, channel, buffer)) = self.buffered_data.get_full_mut(&ch) {
-                let msg = buffer.channel.as_ref()
-                .expect("Buffer has not receiver channel. This is a bug")
-                .receiver
-                .recv()?;
+                let msg = buffer
+                    .channel
+                    .as_ref()
+                    .expect("Buffer has not receiver channel. This is a bug")
+                    .receiver
+                    .recv()?;
 
                 buffer.buffer.insert(msg)?;
                 return Ok(Some(channel));
@@ -210,7 +212,11 @@ impl InputGenerator for UntypedReadChannel {
         Some(UntypedPacketSet::new(packet_set))
     }
 
-    fn create_channels(_buffer_size: usize, _block_on_full: bool, _monitor: BufferMonitorBuilder) -> Self {
+    fn create_channels(
+        _buffer_size: usize,
+        _block_on_full: bool,
+        _monitor: BufferMonitorBuilder,
+    ) -> Self {
         Self::default()
     }
 }

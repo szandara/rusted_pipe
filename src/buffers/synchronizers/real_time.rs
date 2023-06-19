@@ -3,12 +3,12 @@ use super::PacketSynchronizer;
 use crate::buffers::BufferIterator;
 use crate::channels::read_channel::ChannelBuffer;
 use crate::channels::ChannelID;
-use crate::DataVersion;
 use crate::unwrap_or_return;
+use crate::DataVersion;
 use std::cmp::{min, Reverse};
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::iter::Peekable;
-use std::sync::{Arc, RwLock, PoisonError};
+use std::sync::{Arc, PoisonError, RwLock};
 
 /// A synchronizer mostly used for run time computations. It has several configuration
 /// parameters that allow the handling of different use cases when dealing with
@@ -72,13 +72,7 @@ fn extract_matches(
 
     let buffer_min = buffers
         .iter()
-        .filter_map(|b| {
-            if !b.is_empty() {
-                Some(b[0])
-            } else {
-                None
-            }
-        })
+        .filter_map(|b| if !b.is_empty() { Some(b[0]) } else { None })
         .min();
 
     buffer_min?;
@@ -223,13 +217,17 @@ impl PacketSynchronizer for RealTimeSynchronizer {
         &mut self,
         ordered_buffer: Arc<RwLock<dyn ChannelBuffer>>,
     ) -> Option<HashMap<ChannelID, Option<DataVersion>>> {
-        let locked = ordered_buffer.read().unwrap_or_else(PoisonError::into_inner);
+        let locked = ordered_buffer
+            .read()
+            .unwrap_or_else(PoisonError::into_inner);
         let min_version = locked.min_version()?;
 
         let mut iters = vec![];
 
         for channel in locked.available_channels().clone().into_iter() {
-            let iterator = if let Some(iterator) = locked.iterator(channel) {iterator} else {
+            let iterator = if let Some(iterator) = locked.iterator(channel) {
+                iterator
+            } else {
                 eprintln!("Cannot synchronize because {channel} iterator is not available");
                 return None;
             };
@@ -280,12 +278,16 @@ impl PacketSynchronizer for RealTimeSynchronizer {
 
             let versions_map = unwrap_or_return!(versions_map);
 
-            let max_v = if let Some(val) = versions_map.values().max() { val } else {
+            let max_v = if let Some(val) = versions_map.values().max() {
+                val
+            } else {
                 eprintln!("Cannot find max value in synchronization. Returning None");
                 return None;
             };
 
-            let max_v = if let Some(val) = max_v { val } else {
+            let max_v = if let Some(val) = max_v {
+                val
+            } else {
                 eprintln!("Cannot find max value in synchronization. Returning None");
                 return None;
             };

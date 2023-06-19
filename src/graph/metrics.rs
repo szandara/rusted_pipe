@@ -1,14 +1,15 @@
+use lazy_static::lazy_static;
 use prometheus::core::GenericGauge;
+use prometheus::{register_int_gauge_vec, IntGaugeVec};
 use prometheus_exporter::Exporter;
 use pyroscope::pyroscope::PyroscopeAgentRunning;
 use pyroscope::PyroscopeAgent;
 use pyroscope_pprofrs::{pprof_backend, PprofConfig};
-use lazy_static::lazy_static;
-use prometheus::{register_int_gauge_vec, IntGaugeVec};
 
 lazy_static! {
     static ref SIZE_METRIC: IntGaugeVec = register_int_gauge_vec!(
-        "queue_size", "Size of buffering queues",
+        "queue_size",
+        "Size of buffering queues",
         &["node_id", "channel_id"]
     )
     .expect("Cannot create queue_size metrics");
@@ -164,28 +165,23 @@ pub fn spawn_metrics_server(prometheus_addr: &str) -> MetricsServer {
 
 #[derive(Default)]
 pub struct BufferMonitor {
-    metrics: Option<GenericGauge<prometheus::core::AtomicI64>>
+    metrics: Option<GenericGauge<prometheus::core::AtomicI64>>,
 }
 
-
-
-pub struct BufferMonitorBuilder{
-    node_id: Option<String>
+pub struct BufferMonitorBuilder {
+    node_id: Option<String>,
 }
 
 impl BufferMonitorBuilder {
     pub fn new(node_id: &str) -> Self {
         Self {
-            node_id: Some(node_id.to_string())
+            node_id: Some(node_id.to_string()),
         }
     }
 
     pub fn no_monitor() -> Self {
-        Self {
-            node_id: None
-        }
+        Self { node_id: None }
     }
-
 
     pub fn make_channel(&self, channel_id: &str) -> BufferMonitor {
         if let Some(id) = self.node_id.as_ref() {
@@ -193,7 +189,6 @@ impl BufferMonitorBuilder {
         } else {
             BufferMonitor::default()
         }
-        
     }
 }
 
@@ -201,7 +196,7 @@ impl BufferMonitor {
     pub fn new(node_id: &str, channel_id: &str) -> Self {
         let metrics = SIZE_METRIC.with_label_values(&[node_id, channel_id]);
         Self {
-            metrics: Some(metrics)
+            metrics: Some(metrics),
         }
     }
 

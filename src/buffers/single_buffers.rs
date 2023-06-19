@@ -1,9 +1,8 @@
-use crate::{channels::Packet, DataVersion, graph::metrics::BufferMonitor};
+use crate::{channels::Packet, graph::metrics::BufferMonitor, DataVersion};
 use ringbuffer::{AllocRingBuffer, RingBuffer, RingBufferExt, RingBufferRead, RingBufferWrite};
 
-use std::{collections::BTreeMap};
 use super::{BufferError, BufferIterator};
-
+use std::collections::BTreeMap;
 
 type _RingBuffer<T> = AllocRingBuffer<Packet<T>>;
 
@@ -79,7 +78,7 @@ pub trait FixedSizeBuffer: LenTrait {
 pub struct RtRingBuffer<T> {
     buffer: _RingBuffer<T>,
     block_full: bool,
-    monitor: BufferMonitor
+    monitor: BufferMonitor,
 }
 
 impl<T> RtRingBuffer<T> {
@@ -98,7 +97,7 @@ impl<T> RtRingBuffer<T> {
         RtRingBuffer {
             buffer: _RingBuffer::with_capacity(max_size),
             block_full,
-            monitor
+            monitor,
         }
     }
 
@@ -154,14 +153,13 @@ impl<T> FixedSizeBuffer for RtRingBuffer<T> {
     }
 }
 
-
 /// An implementation of 'FixedSizeBuffer' using a BTree. The buffer
 /// is indexed by data version and it's ordered.
 pub struct FixedSizeBTree<T> {
     data: BTreeMap<DataVersion, Packet<T>>,
     max_size: usize,
     block_full: bool,
-    monitor: BufferMonitor
+    monitor: BufferMonitor,
 }
 
 impl<T> Default for FixedSizeBTree<T> {
@@ -172,7 +170,7 @@ impl<T> Default for FixedSizeBTree<T> {
             data: Default::default(),
             max_size: 1000,
             block_full: false,
-            monitor: BufferMonitor::default()
+            monitor: BufferMonitor::default(),
         }
     }
 }
@@ -190,18 +188,15 @@ impl<T> FixedSizeBTree<T> {
             data: Default::default(),
             max_size,
             block_full,
-            monitor
+            monitor,
         }
     }
 }
 
-
 impl<T> LenTrait for FixedSizeBTree<T> {
-
     fn len(&self) -> usize {
         self.data.len()
     }
-
 }
 
 impl<T: Clone> FixedSizeBuffer for FixedSizeBTree<T> {

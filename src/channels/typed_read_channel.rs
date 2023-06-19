@@ -5,13 +5,8 @@ use super::read_channel::BufferReceiver;
 use super::read_channel::ChannelBuffer;
 use super::read_channel::InputGenerator;
 use super::ChannelID;
+use crate::{buffers::single_buffers::RtRingBuffer, graph::metrics::BufferMonitorBuilder};
 use crossbeam::channel::Select;
-use crate::{
-
-    buffers::{single_buffers::RtRingBuffer},
-    graph::metrics::BufferMonitorBuilder
-};
-
 
 use super::ChannelError;
 use crate::buffers::single_buffers::FixedSizeBuffer;
@@ -77,11 +72,11 @@ macro_rules! read_channels {
                 let mut select = Select::new();
                 $(select.recv(&self.$T.receiver.channel.as_ref().expect(&format!("Node {} has no reader channel {}",
                     stringify!($struct_name), self.$T.id)).receiver);)+
-                
+
                 match select.ready_timeout(timeout) {
                     Err(_) => Ok(false),
                     Ok(_) => Ok(true),
-                }   
+                }
             }
 
             fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>{
@@ -214,7 +209,11 @@ impl InputGenerator for NoBuffer {
         todo!()
     }
 
-    fn create_channels(_buffer_size: usize, _block_on_full: bool, _monitor: BufferMonitorBuilder) -> Self {
+    fn create_channels(
+        _buffer_size: usize,
+        _block_on_full: bool,
+        _monitor: BufferMonitorBuilder,
+    ) -> Self {
         todo!()
     }
 }

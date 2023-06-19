@@ -200,13 +200,23 @@ mod tests {
 
         link(
             node0.write_channel.writer.c1(),
-            process_terminal.read_channel.channels.write().unwrap_or_else(PoisonError::into_inner).c1(),
+            process_terminal
+                .read_channel
+                .channels
+                .write()
+                .unwrap_or_else(PoisonError::into_inner)
+                .c1(),
         )
         .expect("Cannot link channels");
 
         link(
             node1.write_channel.writer.c1(),
-            process_terminal.read_channel.channels.write().unwrap_or_else(PoisonError::into_inner).c2(),
+            process_terminal
+                .read_channel
+                .channels
+                .write()
+                .unwrap_or_else(PoisonError::into_inner)
+                .c2(),
         )
         .expect("Cannot link channels");
 

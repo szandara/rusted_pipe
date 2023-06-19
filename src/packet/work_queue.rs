@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
 
-use crate::{channels::ChannelError, buffers::single_buffers::LenTrait};
+use crate::{buffers::single_buffers::LenTrait, channels::ChannelError};
 
 pub struct ReadEvent<T> {
     pub packet_data: T,
@@ -42,7 +42,6 @@ impl<T> Default for WorkQueue<T> {
 }
 
 impl<T> WorkQueue<T> {
-    
     pub fn new(max_in_queue: usize) -> Self {
         let (notifier, queue) = bounded::<ReadEvent<T>>(max_in_queue);
         WorkQueue {

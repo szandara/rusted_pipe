@@ -1,4 +1,4 @@
-#![feature(get_mut_unchecked)]
+// #![feature(get_mut_unchecked)]
 
 pub mod buffers;
 pub mod channels;
@@ -33,5 +33,5 @@ macro_rules! unwrap_or_return {
             Some(x) => x,
             _ => return None,
         }
-    }
+    };
 }
