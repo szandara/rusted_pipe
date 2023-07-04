@@ -14,10 +14,9 @@ Finally the result could look like this depending on the synchronization strateg
 
 <img src="docs/offline.gif" width="500" height="320">
 
-# What is it not?
 Rusted pipe is not a data processing tool and does not solve other parallelism problems such as data parallelism. For that there are already powerful tools such as [Rayon](https://github.com/rayon-rs/rayon). In fact `Rayon` ca be used inside calculators. Similarly this tool is not a competitor of GStreamer. In the examples you will see how to integrate GStreamer with RustedPipe.
 
-## Examples
+# Examples
 
 Minimal example at https://github.com/szandara/rusted_pipe_examples/tree/master/your_first_pipeline.
 
@@ -25,7 +24,7 @@ Check out more pipeline examples at https://github.com/szandara/rusted_pipe_exam
 
 ## Synchronization
 
-Rusted Pipe already offers common syncrhonization strategies but also allows users to create their own. Out of the box Rusted pipe offers the following syncrhonizers:
+Rusted Pipe offers common synchronization strategies but also allows users to create their own. Out of the box Rusted pipe offers the following syncrhonizers:
 
 - TimestampSychronizer: This synchronizer only matches tuple of data if their timestamp match exactly. It's suited for offline computations and data processing. It will try to process any incoming data. If one of the node drops a packat, it might hang the pipeline indefinitely. For that reason buffers should be big enough to account for slow processors.
 
