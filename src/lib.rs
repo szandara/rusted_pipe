@@ -1,5 +1,3 @@
-#![feature(get_mut_unchecked)]
-
 pub mod buffers;
 pub mod channels;
 pub mod graph;
