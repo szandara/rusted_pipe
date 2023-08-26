@@ -1,15 +1,18 @@
 use super::{
     build::{ProcessorWorker, WorkerStatus},
-    metrics::{ProfilerTag},
-    processor::{Processors},
+    metrics::ProfilerTag,
+    processor::Processors,
 };
-use crate::{channels::{read_channel::ReadChannel, typed_write_channel::TypedWriteChannel}, packet::work_queue::WorkQueue};
 use crate::channels::ReadChannelTrait;
 use crate::channels::WriteChannelTrait;
 use crate::graph::build::GraphStatus;
 use crate::{
     channels::read_channel::{ChannelBuffer, InputGenerator},
     RustedPipeError,
+};
+use crate::{
+    channels::{read_channel::ReadChannel, typed_write_channel::TypedWriteChannel},
+    packet::work_queue::WorkQueue,
 };
 use atomic::{Atomic, Ordering};
 use crossbeam::channel::Sender;
@@ -21,7 +24,7 @@ use rusty_pool::ThreadPool;
 use std::{
     sync::{Arc, Condvar, Mutex, PoisonError},
     thread,
-    time::Duration
+    time::Duration,
 };
 
 lazy_static! {
@@ -67,7 +70,7 @@ where
     shared_writer: Option<Arc<Mutex<TypedWriteChannel<OUTPUT>>>>,
     shared_processor: Arc<Mutex<Processors<INPUT, OUTPUT>>>,
     status: Arc<Atomic<WorkerStatus>>,
-    work_queue: Option<WorkQueue<INPUT::INPUT>>
+    work_queue: Option<WorkQueue<INPUT::INPUT>>,
 }
 
 impl<INPUT, OUTPUT> ConsumerThread<INPUT, OUTPUT>
@@ -85,12 +88,12 @@ where
         profiler: ProfilerTag,
     ) -> Self {
         let metrics_timer = METRICS_TIMER.with_label_values(&[&id]);
-        
+
         let mut shared_writer = None;
         if let Some(channel) = worker.write_channel {
             shared_writer = Some(Arc::new(Mutex::new(channel)));
         }
-       
+
         let shared_processor = Arc::new(Mutex::new(worker.processor));
         let status = Arc::new(Atomic::new(WorkerStatus::Idle));
         let work_queue = worker.work_queue;
@@ -105,7 +108,7 @@ where
             shared_writer,
             shared_processor,
             status,
-            work_queue
+            work_queue,
         }
     }
 
@@ -142,18 +145,24 @@ where
                 let future = move || {
                     profiler_clone.add("consumer".to_string(), id_thread.clone());
                     let timer = metrics_clone.start_timer();
-                    let result = match &mut *processor_clone.lock().unwrap_or_else(PoisonError::into_inner) {
+                    let result = match &mut *processor_clone
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                    {
                         Processors::Processor(proc) => {
                             if let Some(packet) = packet {
-                                let write_channel = arc_write_channel.expect(&format!("Consumer thread for node {} was created without write channel", id_thread));
-                                let write_channel = write_channel.lock().unwrap_or_else(PoisonError::into_inner);
-                                
+                                let write_channel = arc_write_channel.expect(&format!(
+                                    "Consumer thread for node {} was created without write channel",
+                                    id_thread
+                                ));
+                                let write_channel =
+                                    write_channel.lock().unwrap_or_else(PoisonError::into_inner);
+
                                 proc.handle(packet, write_channel)
                             } else {
                                 warn!("Packet is None, not processing");
                                 return;
                             }
-
                         }
                         Processors::TerminalProcessor(proc) => {
                             if let Some(packet) = packet {
@@ -162,17 +171,20 @@ where
                                 warn!("Packet is None, not processing");
                                 return;
                             }
-                        },
+                        }
                         Processors::SourceProcessor(proc) => {
-                            let write_channel = arc_write_channel.expect(&format!("Consumer thread for node {} was created without write channel", id_thread));
-                            let write_channel = write_channel.lock().unwrap_or_else(PoisonError::into_inner);
-                            
+                            let write_channel = arc_write_channel.expect(&format!(
+                                "Consumer thread for node {} was created without write channel",
+                                id_thread
+                            ));
+                            let write_channel =
+                                write_channel.lock().unwrap_or_else(PoisonError::into_inner);
+
                             proc.handle(write_channel)
                         }
                     };
-                    
-                    profiler_clone
-                        .remove("consumer".to_string(), id_thread.clone());
+
+                    profiler_clone.remove("consumer".to_string(), id_thread.clone());
                     timer.observe_duration();
                     match result {
                         Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
@@ -186,23 +198,20 @@ where
                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
                         }
                     };
-                    
                 };
 
                 let handle = self.thread_pool.evaluate(future);
                 if handle.try_await_complete().is_err() {
                     eprintln!("Thread panicked in worker {:?}", self.id.clone());
-                    self.status
-                        .store(WorkerStatus::Idle, Ordering::Relaxed);
+                    self.status.store(WorkerStatus::Idle, Ordering::Relaxed);
                 }
             } else {
                 thread::sleep(Duration::from_millis(100));
                 if self.running.load(Ordering::Relaxed) == GraphStatus::WaitingForDataToTerminate {
                     debug!("Sending done {}", self.id);
-                   let _ = self.done_notification.send(self.id.clone());
+                    let _ = self.done_notification.send(self.id.clone());
                 }
             }
-            
         }
         println!("Worker {} exited", self.id);
     }

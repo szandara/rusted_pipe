@@ -1,5 +1,4 @@
 pub mod typed;
-pub mod untyped;
 pub mod work_queue;
 use std::any::{Any, TypeId};
 use std::marker::Copy;
