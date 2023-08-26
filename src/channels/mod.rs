@@ -14,8 +14,6 @@
 pub mod read_channel;
 pub mod typed_read_channel;
 pub mod typed_write_channel;
-pub mod untyped_read_channel;
-pub mod untyped_write_channel;
 
 use crossbeam::channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender, TryRecvError};
 
@@ -140,7 +138,7 @@ pub trait ReadChannelTrait {
     /// `channel_id` -  The string id of the channel.
     /// `done_notification` - A channel for sending a notification if the buffer has processed
     /// all data.
-    /// 
+    ///
     /// * Returns
     /// A ChannelID if something was read, None otherwise.
     fn read(&mut self, channel_id: String, done_notification: Sender<String>) -> Option<ChannelID>;

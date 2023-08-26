@@ -3,7 +3,7 @@
 //! allocate space for the incoming data and synchronize that data using the
 //! user configured syncrhonizer.
 use std::{
-    sync::{Arc, RwLock, PoisonError},
+    sync::{Arc, PoisonError, RwLock},
     thread,
     time::Duration,
 };
@@ -12,8 +12,9 @@ use crossbeam::channel::Sender;
 use log::debug;
 
 use crate::{
-    buffers::{single_buffers::{RtRingBuffer}, synchronizers::PacketSynchronizer},
-    packet::work_queue::WorkQueue, graph::metrics::{BufferMonitorBuilder, BufferMonitor}
+    buffers::{single_buffers::RtRingBuffer, synchronizers::PacketSynchronizer},
+    graph::metrics::{BufferMonitor, BufferMonitorBuilder},
+    packet::work_queue::WorkQueue,
 };
 
 use std::collections::HashMap;
@@ -89,11 +90,11 @@ pub trait ChannelBuffer {
     /// * Arguments
     /// `timeout` - How long to wait for the data.
     fn try_receive(&mut self, timeout: Duration) -> Result<Option<&ChannelID>, ChannelError>;
-    /// Waits for timeout for any channel to have data. 
+    /// Waits for timeout for any channel to have data.
     ///
     /// * Arguments
     /// `timeout` - How long to wait for the data.
-    /// 
+    ///
     /// * Returns
     /// true if there is dat a in any channel before timeout.
     fn wait_for_data(&self, timeout: Duration) -> Result<bool, ChannelError>;
@@ -116,7 +117,11 @@ pub trait InputGenerator {
         exact_match: bool,
     ) -> Option<Self::INPUT>;
 
-    fn create_channels(buffer_size: usize, block_on_full: bool, monitor: BufferMonitorBuilder) -> Self;
+    fn create_channels(
+        buffer_size: usize,
+        block_on_full: bool,
+        monitor: BufferMonitorBuilder,
+    ) -> Self;
 }
 
 /// A generic ReadChannel that holds a reference to a struct that has
@@ -140,11 +145,8 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
         let data;
 
         {
-            let read_locked = self
-                .channels
-                .read()
-                .unwrap_or_else(PoisonError::into_inner);
-            let has_data =  read_locked.wait_for_data(Duration::from_millis(50));
+            let read_locked = self.channels.read().unwrap_or_else(PoisonError::into_inner);
+            let has_data = read_locked.wait_for_data(Duration::from_millis(50));
             if let Err(err) = has_data {
                 eprintln!("Error while waiting for data {err} on channel {node_id}.");
                 return None;
@@ -162,11 +164,9 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                 .write()
                 .unwrap_or_else(PoisonError::into_inner);
             let result = write_locked.try_receive(Duration::from_micros(50));
-        
+
             data = match result {
-                Ok(has_data) => {
-                    has_data.cloned()
-                },
+                Ok(has_data) => has_data.cloned(),
                 Err(err) => {
                     eprintln!("Node {node_id}: Exception while reading {err:?}");
                     match err {
@@ -189,12 +189,10 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
                 }
             };
         }
-        
-        
 
         if data.is_some() {
             self.synchronize()
-        } 
+        }
         data
     }
 
@@ -224,20 +222,23 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         channel_buffer_size: usize,
         process_buffer_size: usize,
         synch_strategy: Box<dyn PacketSynchronizer>,
-        monitor: bool
+        monitor: bool,
     ) -> Self {
         let mut monitor_builder = BufferMonitorBuilder::no_monitor();
         if monitor {
             monitor_builder = BufferMonitorBuilder::new(id);
         }
-        let work_monitor= if monitor {
+        let work_monitor = if monitor {
             monitor_builder.make_channel("_work_queue")
         } else {
             BufferMonitor::default()
         };
 
-        let work_queue = Some(WorkQueue::<T::INPUT>::new(process_buffer_size, work_monitor));
-    
+        let work_queue = Some(WorkQueue::<T::INPUT>::new(
+            process_buffer_size,
+            work_monitor,
+        ));
+
         let channels = T::create_channels(channel_buffer_size, block_channel_full, monitor_builder);
 
         Self {
@@ -251,8 +252,12 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannel<T> {
         if let Some(queue) = self.work_queue.as_mut() {
             let synch = self.synch_strategy.synchronize(self.channels.clone());
             if let Some(sync) = synch {
-                let mut channels = if let Ok(channels) = self.channels.write() {channels} else {return;};
-                    
+                let mut channels = if let Ok(channels) = self.channels.write() {
+                    channels
+                } else {
+                    return;
+                };
+
                 if let Some(value) = channels.get_packets_for_version(&sync, false) {
                     queue.push(value);
                 }
@@ -298,21 +303,16 @@ mod tests {
     use crate::channels::read_channel::ReadChannel;
     use crate::channels::read_channel::ReadChannelTrait;
     use crate::channels::typed_channel;
-    use crate::channels::ChannelID;
-    use crate::channels::ReceiverChannel;
+
     use crate::channels::SenderChannel;
 
     use crate::channels::typed_read_channel::ReadChannel2;
-    use crate::channels::untyped_channel;
-    use crate::channels::untyped_read_channel::UntypedReadChannel;
+
     use crate::graph::metrics::BufferMonitor;
     use crate::packet::typed::ReadChannel2PacketSet;
     use crate::packet::work_queue::WorkQueue;
     use crate::packet::Packet;
-    use crate::packet::Untyped;
     use crate::DataVersion;
-
-    use super::BufferReceiver;
 
     fn create_typed_read_channel() -> (
         ReadChannel<ReadChannel2<String, String>>,
@@ -333,37 +333,6 @@ mod tests {
             .unwrap()
             .c1()
             .link(channel_receiver);
-
-        (read_channel, channel_sender)
-    }
-
-    fn create_untyped_buffer(
-        channel: ReceiverChannel<Box<Untyped>>,
-    ) -> BufferReceiver<RtRingBuffer<Box<Untyped>>> {
-        let buffer = RtRingBuffer::<Box<Untyped>>::new(2, true, BufferMonitor::default());
-        BufferReceiver {
-            buffer: Box::new(buffer),
-            channel: Some(channel),
-        }
-    }
-
-    fn create_untyped_read_channel(
-    ) -> (ReadChannel<UntypedReadChannel>, SenderChannel<Box<Untyped>>) {
-        let synch_strategy = Box::<TimestampSynchronizer>::default();
-        let read_channel2 = UntypedReadChannel::default();
-        let read_channel =
-            ReadChannel::new(synch_strategy, Some(WorkQueue::default()), read_channel2);
-
-        let (channel_sender, channel_receiver) = untyped_channel();
-        read_channel
-            .channels
-            .write()
-            .unwrap()
-            .add_channel(
-                ChannelID::from("test0"),
-                create_untyped_buffer(channel_receiver),
-            )
-            .unwrap();
 
         (read_channel, channel_sender)
     }
@@ -389,35 +358,6 @@ mod tests {
                 .unwrap(),
             DataVersion { timestamp_ns: 1 }
         );
-    }
-
-    #[test]
-    fn test_untyped_read_channel_try_read_returns_ok_if_data() {
-        let (mut read_channel, crossbeam_channels) = create_untyped_read_channel();
-        crossbeam_channels
-            .send(Packet::new("my_data".to_string(), DataVersion { timestamp_ns: 1 }).to_untyped())
-            .unwrap();
-        read_channel.start(WorkQueue::default());
-        assert_eq!(
-            read_channel
-                .channels
-                .write()
-                .unwrap()
-                .get_channel_mut(&ChannelID::from("test0"))
-                .unwrap()
-                .try_read()
-                .unwrap(),
-            DataVersion { timestamp_ns: 1 }
-        );
-
-        assert!(read_channel
-            .channels
-            .write()
-            .unwrap()
-            .get_channel_mut(&ChannelID::from("test0"))
-            .unwrap()
-            .try_read()
-            .is_err());
     }
 
     #[test]
