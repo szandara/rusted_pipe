@@ -10,8 +10,6 @@ path = "src/lib.rs"
 
 
 [dependencies]
-futures = { version = "0.3.17", features = ["thread-pool"] }
-tokio = { version = "1.28", features = ["full"] }
 approx = "0.4"
 lazy_static = "1.4.0"
 byteorder = "1.4.3"
@@ -31,7 +29,6 @@ rstest = "^0.16.0"
 derive_builder = "^0.12.0"
 prometheus = "^0.13.3"
 derive-new = "0.5"
-hyper = {version = "^1.0.0-rc.3", features = ["full"]}
 http-body-util = "=0.1.0-rc.2"
 bytes = "^1.4.0"
 pyroscope = "0.5.4"

@@ -1,4 +1,7 @@
-# NOTE: The project is in Alpha stage and not extensively tested. Use at your own risk and make sure to open issues if you find problems.
+![unit](https://github.com/szandara/rusted_pipe/actions/workflows/rust.yml/badge.svg)
+
+> **Note**
+> The project is in Alpha stage and not extensively tested. Use at your own risk and make sure to open issues if you find problems.
 
 # Rusted Pipe
 
