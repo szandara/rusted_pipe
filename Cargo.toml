@@ -4,11 +4,12 @@ version = "0.0.2"
 authors = ["Simone Zandara <simone.zandara@gmail.com>"]
 edition = "2021"
 license = "MIT"
+description = "Real time processing library for developing multithreaded ML pipelines, written in Rust."
+
 
 [lib]
 name = "rusted_pipe"
 path = "src/lib.rs"
-description = "Real time processing library for developing multithreaded ML pipelines, written in Rust."
 
 
 [dependencies]
