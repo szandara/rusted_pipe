@@ -3,10 +3,12 @@ name = "rusted_pipe"
 version = "0.1.0"
 authors = ["Simone Zandara <simone.zandara@gmail.com>"]
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "rusted_pipe"
 path = "src/lib.rs"
+description = "Real time processing library for developing multithreaded ML pipelines, written in Rust."
 
 
 [dependencies]
