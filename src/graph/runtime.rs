@@ -189,12 +189,12 @@ where
                     match result {
                         Ok(_) => lock_status.store(WorkerStatus::Idle, Ordering::Relaxed),
                         Err(RustedPipeError::EndOfStream()) => {
-                            eprintln!("Terminating worker {id_thread:?}");
+                            tracing::error!("Terminating worker {id_thread:?}");
                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
                             let _ = done_clone.send(id_thread.clone());
                         }
                         Err(err) => {
-                            eprintln!("Error in worker {id_thread:?}: {err:?}");
+                            tracing::error!("Error in worker {id_thread:?}: {err:?}");
                             lock_status.store(WorkerStatus::Terminating, Ordering::Relaxed);
                         }
                     };
@@ -202,7 +202,7 @@ where
 
                 let handle = self.thread_pool.evaluate(future);
                 if handle.try_await_complete().is_err() {
-                    eprintln!("Thread panicked in worker {:?}", self.id.clone());
+                    tracing::error!("Thread panicked in worker {:?}", self.id.clone());
                     self.status.store(WorkerStatus::Idle, Ordering::Relaxed);
                 }
             } else {
@@ -213,6 +213,6 @@ where
                 }
             }
         }
-        println!("Worker {} exited", self.id);
+        tracing::info!("Worker {} exited", self.id);
     }
 }

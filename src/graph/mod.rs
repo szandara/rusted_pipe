@@ -83,7 +83,7 @@ mod tests {
                 )
                 .unwrap();
             let e = SystemTime::now().duration_since(s).unwrap();
-            println!(
+            tracing::info!(
                 "P {}, Sending {} at {} in {}",
                 self.id,
                 self.counter,
@@ -124,7 +124,7 @@ mod tests {
             &mut self,
             input: ReadChannel2PacketSet<String, String>,
         ) -> Result<(), RustedPipeError> {
-            println!(
+            tracing::info!(
                 "Received {} at {}",
                 self.counter,
                 SystemTime::now()
@@ -134,7 +134,7 @@ mod tests {
             );
             self.counter += 1;
             if let Err(err) = self.output.send(input) {
-                eprintln!("Error sending on channel {}: {:?}", self.id, err);
+                tracing::error!("Error sending on channel {}: {:?}", self.id, err);
             }
             thread::sleep(Duration::from_millis(self.consume_time_ms));
             Ok(())
@@ -357,7 +357,7 @@ mod tests {
         }
 
         check_results(&results, max_packets);
-        println!("Stopping graph");
+        tracing::info!("Stopping graph");
         graph.stop(false, None);
     }
 
@@ -387,7 +387,7 @@ mod tests {
         for _i in 0..expected_versions.len() {
             let data = output_check.recv_deadline(deadline);
             if data.is_err() {
-                eprintln!("Error receiving {:?}", data.err().unwrap());
+                tracing::error!("Error receiving {:?}", data.err().unwrap());
                 break;
             }
             results.push(data.unwrap());

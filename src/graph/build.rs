@@ -228,7 +228,7 @@ impl Graph {
         }
 
         self.thread_control.push(wait);
-        println!("Done Starting Node {node_id}");
+        tracing::info!("Done Starting Node {node_id}");
     }
 
     pub fn stop(mut self, wait_for_data: bool, timeout: Option<Duration>) {
@@ -239,7 +239,7 @@ impl Graph {
             // Wait for all buffers to be empty
             self.running
                 .swap(GraphStatus::WaitingForDataToTerminate, Ordering::Relaxed);
-            println!("Waiting for data to be consumed");
+            tracing::info!("Waiting for data to be consumed");
             while !self
                 .node_threads
                 .iter()
@@ -283,16 +283,16 @@ impl Graph {
         
         let keys = self.node_threads.keys().cloned().collect_vec();
         for id in keys {
-            println!("Waiting for node {id} to stop");
+            tracing::info!("Waiting for node {id} to stop");
             self.node_threads.remove(&id).expect("Thread ID not found").join().unwrap_or_else(|_| panic!("Cannot join thread {id}"));
         }
 
         let keys = self.read_threads.keys().cloned().collect_vec();
         for id in keys {
-            println!("Waiting for reader {id} to stop");
+            tracing::info!("Waiting for reader {id} to stop");
             self.read_threads.remove(&id).expect("Thread ID not found").join().unwrap_or_else(|_| panic!("Cannot join thread {id}"));
         }
-        println!("Waiting for metrics to stop");
+        tracing::info!("Waiting for metrics to stop");
         self.metrics.stop();
     }
 }

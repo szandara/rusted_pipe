@@ -148,7 +148,7 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
             let read_locked = self.channels.read().unwrap_or_else(PoisonError::into_inner);
             let has_data = read_locked.wait_for_data(Duration::from_millis(50));
             if let Err(err) = has_data {
-                eprintln!("Error while waiting for data {err} on channel {node_id}.");
+                tracing::error!("Error while waiting for data {err} on channel {node_id}.");
                 return None;
             }
             if let Ok(data) = has_data {
@@ -168,13 +168,13 @@ impl<T: InputGenerator + ChannelBuffer + Send + 'static> ReadChannelTrait for Re
             data = match result {
                 Ok(has_data) => has_data.cloned(),
                 Err(err) => {
-                    eprintln!("Node {node_id}: Exception while reading {err:?}");
+                    tracing::error!("Node {node_id}: Exception while reading {err:?}");
                     match err {
                         crate::channels::ChannelError::ReceiveError(_) => {
                             if write_locked.are_buffers_empty() {
                                 let _ = done_notification.send(node_id);
                             }
-                            eprintln!("Channel is disonnected, closing");
+                            tracing::error!("Channel is disonnected, closing");
                             thread::sleep(Duration::from_millis(100));
                             return None;
                         }
