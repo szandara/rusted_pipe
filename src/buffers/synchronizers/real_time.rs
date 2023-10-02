@@ -208,7 +208,7 @@ impl PacketSynchronizer for RealTimeSynchronizer {
 
         for channel in locked.available_channels().clone().into_iter() {
             let iterator = if let Some(iterator) = locked.iterator(channel) {iterator} else {
-                eprintln!("Cannot synchronize because {channel} iterator is not available");
+                tracing::error!("Cannot synchronize because {channel} iterator is not available");
                 return None;
             };
             iters.push(iterator);
@@ -237,12 +237,12 @@ impl PacketSynchronizer for RealTimeSynchronizer {
             let versions_map = unwrap_or_return!(versions_map);
 
             let max_v = if let Some(val) = versions_map.values().max() { val } else {
-                eprintln!("Cannot find max value in synchronization. Returning None");
+                tracing::error!("Cannot find max value in synchronization. Returning None");
                 return None;
             };
 
             let max_v = if let Some(val) = max_v { val } else {
-                eprintln!("Cannot find max value in synchronization. Returning None");
+                tracing::error!("Cannot find max value in synchronization. Returning None");
                 return None;
             };
             self.last_returned = Some(max_v.timestamp_ns);

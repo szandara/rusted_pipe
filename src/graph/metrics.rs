@@ -123,7 +123,7 @@ pub struct MetricsServer {
 
 impl MetricsServer {
     pub fn stop(self) {
-        println!("Shut down Prometheus server");
+        tracing::info!("Shut down Prometheus server");
     }
 }
 
@@ -131,7 +131,7 @@ impl Profiler {
     pub fn stop(self) {
         let agent_ready = self.profiler.stop().expect("Cannot stop Pyroscope agent.");
         agent_ready.shutdown();
-        println!("Shut down Pyroscope server");
+        tracing::info!("Shut down Pyroscope server");
     }
 }
 
@@ -142,7 +142,7 @@ pub fn create_profiler_agent(pyroscope_server_addr: &str) -> Profiler {
         .build()
         .expect("Cannot start Pyroscope server");
     let agent_running = agent.start().unwrap();
-    println!("Sending Pyroscope data to {pyroscope_server_addr}");
+    tracing::info!("Sending Pyroscope data to {pyroscope_server_addr}");
     Profiler {
         profiler: agent_running,
     }
